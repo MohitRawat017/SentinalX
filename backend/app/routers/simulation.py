@@ -28,7 +28,7 @@ SUSPICIOUS_IPS = [
     {"ip": "103.75.190.11", "country": "Nigeria", "city": "Lagos", "lat": 6.5244, "lng": 3.3792},
     {"ip": "45.33.32.156", "country": "China", "city": "Beijing", "lat": 39.9042, "lng": 116.4074},
     {"ip": "198.51.100.23", "country": "Iran", "city": "Tehran", "lat": 35.6892, "lng": 51.3890},
-    {"ip": "91.108.56.12", "country": "Brazil", "city": "São Paulo", "lat": -23.5505, "lng": -46.6333},
+    {"ip": "91.108.56.12", "country": "Brazil", "city": "Sao Paulo", "lat": -23.5505, "lng": -46.6333},
 ]
 
 NORMAL_IPS = [
@@ -95,7 +95,7 @@ async def run_simulation(req: SimulationRequest, db: AsyncSession = Depends(get_
     return {
         "scenario": req.scenario,
         "results": results,
-        "count": len(results),
+        "count": len(results) if isinstance(results, list) else 1,
         "wallet": wallet,
     }
 
@@ -105,36 +105,12 @@ async def list_scenarios():
     """List available simulation scenarios"""
     return {
         "scenarios": [
-            {
-                "id": "suspicious_login",
-                "name": "🔴 Suspicious Login",
-                "description": "Login from a suspicious IP with unusual device fingerprint",
-            },
-            {
-                "id": "normal_login",
-                "name": "🟢 Normal Login",
-                "description": "Standard login from a known IP",
-            },
-            {
-                "id": "data_leak",
-                "name": "🟡 Data Leak Attempt",
-                "description": "User tries to send sensitive data (credit card, SSN, etc.)",
-            },
-            {
-                "id": "clean_text",
-                "name": "✅ Clean Text",
-                "description": "Normal text that passes GuardLayer checks",
-            },
-            {
-                "id": "burst_attack",
-                "name": "⚡ Burst Attack",
-                "description": "Rapid-fire login attempts simulating a brute force attack",
-            },
-            {
-                "id": "full_demo",
-                "name": "🎬 Full Demo",
-                "description": "Complete scenario: normal login → suspicious login → data leak → burst attack",
-            },
+            {"id": "suspicious_login", "name": "Suspicious Login", "description": "Login from a suspicious IP with unusual device fingerprint"},
+            {"id": "normal_login", "name": "Normal Login", "description": "Standard login from a known IP"},
+            {"id": "data_leak", "name": "Data Leak Attempt", "description": "User tries to send sensitive data (credit card, SSN, etc.)"},
+            {"id": "clean_text", "name": "Clean Text", "description": "Normal text that passes GuardLayer checks"},
+            {"id": "burst_attack", "name": "Burst Attack", "description": "Rapid-fire login attempts simulating a brute force attack"},
+            {"id": "full_demo", "name": "Full Demo", "description": "Complete scenario: normal login -> suspicious login -> data leak -> burst attack"},
         ]
     }
 
@@ -148,18 +124,18 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
 
     for i in range(min(count, 10)):
         ip_info = random.choice(SUSPICIOUS_IPS)
-        features = risk_engine.compute_features(
+
+        risk_score, risk_level, explanation = await risk_engine.score(
+            db=db,
+            wallet_address=wallet,
             ip_address=ip_info["ip"],
             user_agent="Mozilla/5.0 (Linux; Android 4.4) AppleWebKit/537.36 UnknownBot/1.0",
-            wallet_address=wallet,
-            current_hour=random.choice([1, 2, 3, 4, 23]),  # Unusual hours
+            geo_country=ip_info["country"],
+            current_hour=random.choice([1, 2, 3, 4, 23]),
         )
-        # Amplify risk signals for demo
-        features["ip_entropy"] = max(features["ip_entropy"], 0.75)
-        features["device_fingerprint"] = min(features["device_fingerprint"], 0.25)
-        features["time_deviation"] = max(features["time_deviation"], 0.65)
-
-        risk_score, risk_level, explanation = risk_engine.score(features)
+        # Amplify risk for demo: ensure high score
+        risk_score = max(risk_score, 0.7)
+        risk_level = "high"
 
         event_data = json.dumps({
             "wallet": wallet.lower(), "ip": ip_info["ip"],
@@ -167,6 +143,8 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
             "timestamp": datetime.utcnow().isoformat(),
         }, sort_keys=True)
         event_hash = hashlib.sha256(event_data.encode()).hexdigest()
+
+        features = {f["feature"]: f["value"] for f in explanation.get("factors", [])}
 
         login_event = LoginEvent(
             id=str(uuid.uuid4()),
@@ -181,7 +159,7 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
             risk_score=risk_score,
             risk_level=risk_level,
             risk_features=features,
-            step_up_required=risk_score >= 0.7,
+            step_up_required=True,
             event_hash=event_hash,
             timestamp=datetime.utcnow() - timedelta(minutes=random.randint(0, 60)),
         )
@@ -211,13 +189,15 @@ async def _simulate_normal_login(wallet: str, count: int, db: AsyncSession):
 
     for i in range(min(count, 10)):
         ip_info = random.choice(NORMAL_IPS)
-        features = risk_engine.compute_features(
+
+        risk_score, risk_level, explanation = await risk_engine.score(
+            db=db,
+            wallet_address=wallet,
             ip_address=ip_info["ip"],
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0",
-            wallet_address=wallet,
+            geo_country=ip_info["country"],
             current_hour=random.choice([9, 10, 11, 14, 15, 16]),
         )
-        risk_score, risk_level, explanation = risk_engine.score(features)
 
         event_data = json.dumps({
             "wallet": wallet.lower(), "ip": ip_info["ip"],
@@ -238,7 +218,7 @@ async def _simulate_normal_login(wallet: str, count: int, db: AsyncSession):
             geo_city=ip_info["city"],
             risk_score=risk_score,
             risk_level=risk_level,
-            risk_features=features,
+            risk_features={f["feature"]: f["value"] for f in explanation.get("factors", [])},
             event_hash=event_hash,
             timestamp=datetime.utcnow() - timedelta(minutes=random.randint(0, 120)),
         )
@@ -320,17 +300,18 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
 
     for i in range(8):
         ip_info = random.choice(SUSPICIOUS_IPS)
-        features = risk_engine.compute_features(
+
+        risk_score, risk_level, explanation = await risk_engine.score(
+            db=db,
+            wallet_address=wallet,
             ip_address=ip_info["ip"],
             user_agent=f"Bot-Scanner/{random.randint(1,99)}",
-            wallet_address=wallet,
+            geo_country=ip_info["country"],
             current_hour=3,
         )
-        features["login_velocity"] = min(0.5 + i * 0.07, 1.0)
-        features["ip_entropy"] = 0.85
-        features["device_fingerprint"] = 0.15
-
-        risk_score, risk_level, explanation = risk_engine.score(features)
+        # Amplify for demo
+        risk_score = max(risk_score, 0.75)
+        risk_level = "high"
 
         event_data = json.dumps({
             "wallet": wallet.lower(), "burst": i,
@@ -350,7 +331,7 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
             geo_city=ip_info["city"],
             risk_score=risk_score,
             risk_level=risk_level,
-            risk_features=features,
+            risk_features={f["feature"]: f["value"] for f in explanation.get("factors", [])},
             step_up_required=True,
             event_hash=event_hash,
             timestamp=datetime.utcnow() - timedelta(seconds=i * 3),
@@ -363,7 +344,6 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
             "attempt": i + 1,
             "risk_score": risk_score,
             "risk_level": risk_level,
-            "velocity": features["login_velocity"],
             "country": ip_info["country"],
         })
 

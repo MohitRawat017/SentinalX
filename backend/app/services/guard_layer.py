@@ -100,6 +100,29 @@ Respond in JSON format:
 
 Only respond with the JSON, nothing else."""
 
+    REDACT_PROMPT = """You are a data redaction engine. Replace ALL sensitive data in the text with redaction placeholders.
+
+Rules:
+- Credit card numbers → [REDACTED-CREDIT_CARD]
+- Social Security Numbers → [REDACTED-SSN]
+- Email addresses → [REDACTED-EMAIL]
+- Phone numbers → [REDACTED-PHONE]
+- API keys / tokens → [REDACTED-API_KEY]
+- Private keys → [REDACTED-PRIVATE_KEY]
+- Passwords → [REDACTED-PASSWORD]
+- Names of people → [REDACTED-NAME]
+- Physical addresses → [REDACTED-ADDRESS]
+- Medical information → [REDACTED-MEDICAL]
+- Financial amounts / accounts → [REDACTED-FINANCIAL]
+- Any other sensitive data → [REDACTED]
+
+Return ONLY the redacted text, nothing else.
+
+Text to redact:
+---
+{text}
+---"""
+
     def __init__(self):
         self.openai_client = None
         if HAS_OPENAI and settings.OPENROUTER_API_KEY:
@@ -214,4 +237,42 @@ Only respond with the JSON, nothing else."""
             "event_hash": event_hash,
             "scanned_at": datetime.utcnow().isoformat(),
             "scan_type": "regex+llm" if llm_result else "regex",
+        }
+
+    async def redact(self, text: str) -> Dict:
+        """
+        Redact sensitive data from text.
+        Uses LLM if available, otherwise falls back to regex replacement.
+        """
+        # Try LLM redaction first
+        if self.openai_client:
+            try:
+                response = self.openai_client.chat.completions.create(
+                    model="meta-llama/llama-3.2-3b-instruct:free",
+                    messages=[
+                        {"role": "system", "content": "You are a data redaction engine. Return only the redacted text."},
+                        {"role": "user", "content": self.REDACT_PROMPT.format(text=text[:2000])},
+                    ],
+                    temperature=0.0,
+                    max_tokens=1000,
+                )
+                redacted_text = response.choices[0].message.content.strip()
+                return {
+                    "original_hash": hashlib.sha256(text.encode()).hexdigest(),
+                    "redacted_text": redacted_text,
+                    "method": "llm",
+                }
+            except Exception:
+                pass
+
+        # Fallback: regex-based redaction
+        redacted_text = text
+        for key, config in self.PATTERNS.items():
+            label = key.upper()
+            redacted_text = re.sub(config["pattern"], f"[REDACTED-{label}]", redacted_text)
+
+        return {
+            "original_hash": hashlib.sha256(text.encode()).hexdigest(),
+            "redacted_text": redacted_text,
+            "method": "regex",
         }

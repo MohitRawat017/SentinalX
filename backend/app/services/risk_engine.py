@@ -1,40 +1,43 @@
 """
 SentinelX AI Risk Engine
-IsolationForest-based anomaly detection for login risk scoring
+Weighted history-aware login risk scoring
 """
 import hashlib
-import json
-import math
-import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import IsolationForest
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# We'll use a simple feature importance approach instead of full SHAP
-# to avoid heavy dependencies during hackathon demo
+from app.models.models import LoginEvent
+
+
+# ─── Weights from ADD_ON spec ────────────────────────────────────────
+WEIGHT_NEW_DEVICE = 0.4
+WEIGHT_NEW_COUNTRY = 0.4
+WEIGHT_RAPID_ATTEMPTS = 0.6
+WEIGHT_ABNORMAL_TIME = 0.2
+
+MAX_RAW_SCORE = (WEIGHT_NEW_DEVICE + WEIGHT_NEW_COUNTRY +
+                 WEIGHT_RAPID_ATTEMPTS + WEIGHT_ABNORMAL_TIME)  # 1.6
+
+# Thresholds
+THRESHOLD_LOW = 0.4
+THRESHOLD_HIGH = 0.7
+
+# Rapid-attempts: 3+ logins within this window triggers the factor
+RAPID_WINDOW_MINUTES = 10
+RAPID_COUNT_THRESHOLD = 3
+
+# Normal hours range (inclusive)
+NORMAL_HOUR_START = 6
+NORMAL_HOUR_END = 22
 
 
 class RiskEngine:
-    """AI-powered login risk scoring using IsolationForest"""
+    """History-aware weighted login risk scoring"""
 
     _instance = None
-
-    def __init__(self):
-        self.model: Optional[IsolationForest] = None
-        self.feature_names = [
-            "ip_entropy",
-            "time_deviation",
-            "device_fingerprint",
-            "login_velocity",
-            "wallet_age_score",
-        ]
-        self.training_data: List[Dict] = []
-        self.is_trained = False
-        self._seed_synthetic_data()
-        self._train_model()
 
     @classmethod
     def get_instance(cls):
@@ -42,203 +45,154 @@ class RiskEngine:
             cls._instance = cls()
         return cls._instance
 
-    def _seed_synthetic_data(self):
-        """Generate synthetic normal login data for initial training"""
-        np.random.seed(42)
-        n_normal = 200
+    # ─── Core scoring (async, needs DB) ──────────────────────────────
 
-        normal_data = []
-        for _ in range(n_normal):
-            normal_data.append({
-                "ip_entropy": np.random.normal(0.3, 0.1),
-                "time_deviation": np.random.normal(0.2, 0.15),
-                "device_fingerprint": np.random.normal(0.8, 0.1),
-                "login_velocity": np.random.normal(0.1, 0.05),
-                "wallet_age_score": np.random.normal(0.7, 0.15),
-            })
-
-        # Add some anomalous patterns
-        n_anomalous = 20
-        for _ in range(n_anomalous):
-            normal_data.append({
-                "ip_entropy": np.random.uniform(0.7, 1.0),
-                "time_deviation": np.random.uniform(0.6, 1.0),
-                "device_fingerprint": np.random.uniform(0.0, 0.3),
-                "login_velocity": np.random.uniform(0.6, 1.0),
-                "wallet_age_score": np.random.uniform(0.0, 0.3),
-            })
-
-        self.training_data = normal_data
-
-    def _train_model(self):
-        """Train IsolationForest on accumulated data"""
-        if len(self.training_data) < 10:
-            return
-
-        df = pd.DataFrame(self.training_data)
-        # Clip values to [0, 1]
-        for col in self.feature_names:
-            df[col] = df[col].clip(0.0, 1.0)
-
-        self.model = IsolationForest(
-            n_estimators=100,
-            contamination=0.1,
-            random_state=42,
-            max_samples="auto",
-        )
-        self.model.fit(df[self.feature_names])
-        self.is_trained = True
-
-    def compute_features(
+    async def score(
         self,
+        db: AsyncSession,
+        wallet_address: str,
         ip_address: str = "0.0.0.0",
         user_agent: str = "",
-        wallet_address: str = "",
-        login_history: Optional[List[Dict]] = None,
+        geo_country: Optional[str] = None,
         current_hour: Optional[int] = None,
-    ) -> Dict[str, float]:
-        """Compute the 5 risk features for a login event"""
-
-        # Feature 1: IP Entropy — measures how unusual the IP is
-        ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()
-        ip_entropy = sum(c.isalpha() for c in ip_hash[:16]) / 16.0
-        # Known suspicious IPs boost entropy
-        if ip_address.startswith("10.") or ip_address == "0.0.0.0":
-            ip_entropy = max(ip_entropy, 0.2)
-
-        # Feature 2: Time Deviation — deviation from user's normal login time
+    ) -> Tuple[float, str, Dict]:
+        """
+        Compute risk score for a login attempt using wallet history.
+        Returns (risk_score, risk_level, explanation).
+        """
+        wallet = wallet_address.lower()
         if current_hour is None:
             current_hour = datetime.utcnow().hour
-        # Normal hours: 8-22, unusual: 0-6
-        if 8 <= current_hour <= 22:
-            time_deviation = abs(current_hour - 15) / 15.0 * 0.3
-        else:
-            time_deviation = 0.5 + abs(current_hour - 3) / 24.0
 
-        # Feature 3: Device Fingerprint — similarity to known devices
-        if user_agent:
-            ua_hash = hashlib.md5(user_agent.encode()).hexdigest()
-            device_fingerprint = 1.0 - (int(ua_hash[:4], 16) / 65535.0) * 0.4
-        else:
-            device_fingerprint = 0.3  # No device info = moderate risk
+        # Fetch recent login history for this wallet
+        history = await self._get_history(db, wallet)
 
-        # Feature 4: Login Velocity — how frequently logins are happening
-        if login_history and len(login_history) > 1:
-            recent = login_history[-5:]
-            if len(recent) >= 2:
-                time_diffs = []
-                for i in range(1, len(recent)):
-                    t1 = recent[i - 1].get("timestamp", 0)
-                    t2 = recent[i].get("timestamp", 0)
-                    if isinstance(t1, (int, float)) and isinstance(t2, (int, float)):
-                        time_diffs.append(abs(t2 - t1))
-                if time_diffs:
-                    avg_diff = sum(time_diffs) / len(time_diffs)
-                    login_velocity = max(0, 1.0 - avg_diff / 3600.0)
-                else:
-                    login_velocity = 0.1
-            else:
-                login_velocity = 0.1
-        else:
-            login_velocity = 0.1
+        # Compute binary factors (each 0.0 or 1.0)
+        new_device = self._check_new_device(user_agent, history)
+        new_country = self._check_new_country(geo_country, history)
+        rapid_attempts = self._check_rapid_attempts(history)
+        abnormal_time = self._check_abnormal_time(current_hour)
 
-        # Feature 5: Wallet Age Score — newer wallets are riskier
-        wallet_hash = hashlib.sha256(wallet_address.lower().encode()).hexdigest()
-        wallet_age_score = 0.5 + (int(wallet_hash[:4], 16) / 65535.0) * 0.5
+        # Weighted sum → normalize to 0-1
+        raw_score = (
+            new_device * WEIGHT_NEW_DEVICE +
+            new_country * WEIGHT_NEW_COUNTRY +
+            rapid_attempts * WEIGHT_RAPID_ATTEMPTS +
+            abnormal_time * WEIGHT_ABNORMAL_TIME
+        )
+        risk_score = round(min(raw_score / MAX_RAW_SCORE, 1.0), 4)
 
-        features = {
-            "ip_entropy": round(min(max(ip_entropy, 0.0), 1.0), 4),
-            "time_deviation": round(min(max(time_deviation, 0.0), 1.0), 4),
-            "device_fingerprint": round(min(max(device_fingerprint, 0.0), 1.0), 4),
-            "login_velocity": round(min(max(login_velocity, 0.0), 1.0), 4),
-            "wallet_age_score": round(min(max(wallet_age_score, 0.0), 1.0), 4),
-        }
-
-        return features
-
-    def score(self, features: Dict[str, float]) -> Tuple[float, str, Dict]:
-        """
-        Score a login event. Returns (risk_score, risk_level, explanation).
-        risk_score: 0.0 (safe) to 1.0 (dangerous)
-        """
-        if not self.is_trained or self.model is None:
-            return 0.5, "medium", {"note": "Model not trained yet"}
-
-        feature_values = np.array([[features[f] for f in self.feature_names]])
-
-        # IsolationForest: decision_function returns anomaly score
-        # More negative = more anomalous
-        raw_score = self.model.decision_function(feature_values)[0]
-
-        # Convert to 0-1 risk score (more negative → higher risk)
-        # decision_function typical range: -0.5 to 0.5
-        risk_score = round(max(0.0, min(1.0, 0.5 - raw_score)), 4)
-
-        # Determine risk level
-        if risk_score < 0.3:
+        # Risk level
+        if risk_score < THRESHOLD_LOW:
             risk_level = "low"
-        elif risk_score < 0.7:
+        elif risk_score < THRESHOLD_HIGH:
             risk_level = "medium"
         else:
             risk_level = "high"
 
-        # Feature importance explanation (simple approach)
-        explanation = self._explain(features, risk_score)
+        # Build features dict (for storage in LoginEvent.risk_features)
+        features = {
+            "new_device": new_device,
+            "new_country": new_country,
+            "rapid_attempts": rapid_attempts,
+            "abnormal_time": abnormal_time,
+        }
+
+        # Build explanation
+        explanation = self._explain(features, risk_score, risk_level)
 
         return risk_score, risk_level, explanation
 
-    def _explain(self, features: Dict[str, float], risk_score: float) -> Dict:
-        """Generate explainability info for the risk score"""
-        # Compute each feature's contribution relative to normal baseline
-        baseline = {
-            "ip_entropy": 0.3,
-            "time_deviation": 0.2,
-            "device_fingerprint": 0.8,
-            "login_velocity": 0.1,
-            "wallet_age_score": 0.7,
+    # ─── Factor checks ───────────────────────────────────────────────
+
+    def _check_new_device(self, user_agent: str, history: List[LoginEvent]) -> float:
+        """1.0 if this user_agent has never been seen for the wallet."""
+        if not user_agent or not history:
+            return 1.0
+        ua_hash = hashlib.md5(user_agent.encode()).hexdigest()
+        for event in history:
+            if event.user_agent:
+                prev_hash = hashlib.md5(event.user_agent.encode()).hexdigest()
+                if prev_hash == ua_hash:
+                    return 0.0
+        return 1.0
+
+    def _check_new_country(self, geo_country: Optional[str], history: List[LoginEvent]) -> float:
+        """1.0 if this country has never been seen for the wallet."""
+        if not geo_country:
+            return 0.0
+        if not history:
+            return 1.0
+        known_countries = {e.geo_country for e in history if e.geo_country}
+        return 0.0 if geo_country in known_countries else 1.0
+
+    def _check_rapid_attempts(self, history: List[LoginEvent]) -> float:
+        """1.0 if 3+ logins within the last 10 minutes."""
+        if not history:
+            return 0.0
+        cutoff = datetime.utcnow() - timedelta(minutes=RAPID_WINDOW_MINUTES)
+        recent_count = sum(1 for e in history if e.timestamp and e.timestamp >= cutoff)
+        return 1.0 if recent_count >= RAPID_COUNT_THRESHOLD else 0.0
+
+    def _check_abnormal_time(self, current_hour: int) -> float:
+        """1.0 if current hour is outside normal hours (6am-10pm)."""
+        return 0.0 if NORMAL_HOUR_START <= current_hour <= NORMAL_HOUR_END else 1.0
+
+    # ─── History lookup ──────────────────────────────────────────────
+
+    async def _get_history(self, db: AsyncSession, wallet: str, limit: int = 50) -> List[LoginEvent]:
+        """Fetch recent login history for a wallet."""
+        result = await db.execute(
+            select(LoginEvent)
+            .where(LoginEvent.wallet_address == wallet)
+            .order_by(desc(LoginEvent.timestamp))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    # ─── Explanation ─────────────────────────────────────────────────
+
+    def _explain(self, features: Dict[str, float], risk_score: float, risk_level: str) -> Dict:
+        """Generate human-readable explanation of the risk score."""
+        labels = {
+            "new_device": "New device / browser",
+            "new_country": "New geographic location",
+            "rapid_attempts": "Rapid login attempts",
+            "abnormal_time": "Login at unusual hour",
+        }
+        weights = {
+            "new_device": WEIGHT_NEW_DEVICE,
+            "new_country": WEIGHT_NEW_COUNTRY,
+            "rapid_attempts": WEIGHT_RAPID_ATTEMPTS,
+            "abnormal_time": WEIGHT_ABNORMAL_TIME,
         }
 
-        contributions = {}
-        for feat in self.feature_names:
-            diff = features[feat] - baseline[feat]
-            # Higher ip_entropy, time_deviation, login_velocity = riskier
-            # Lower device_fingerprint, wallet_age_score = riskier
-            if feat in ["device_fingerprint", "wallet_age_score"]:
-                contributions[feat] = round(-diff, 4)
-            else:
-                contributions[feat] = round(diff, 4)
-
-        sorted_contribs = sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)
-
         top_factors = []
-        for feat, contrib in sorted_contribs[:3]:
-            direction = "increasing" if contrib > 0 else "decreasing"
-            labels = {
-                "ip_entropy": "IP address pattern",
-                "time_deviation": "Login time anomaly",
-                "device_fingerprint": "Device recognition",
-                "login_velocity": "Login frequency",
-                "wallet_age_score": "Wallet trust score",
-            }
+        for feat, value in features.items():
+            contribution = round(value * weights[feat] / MAX_RAW_SCORE, 4)
             top_factors.append({
                 "feature": feat,
-                "label": labels.get(feat, feat),
-                "contribution": contrib,
-                "direction": direction,
-                "value": features[feat],
+                "label": labels[feat],
+                "triggered": value == 1.0,
+                "weight": weights[feat],
+                "contribution": contribution,
+                "value": value,
             })
+
+        # Sort by contribution descending
+        top_factors.sort(key=lambda f: f["contribution"], reverse=True)
+
+        actions = {
+            "low": "Allow — no friction",
+            "medium": "Step-up verification required",
+            "high": "Block — require re-authentication",
+        }
 
         return {
             "risk_score": risk_score,
-            "contributions": contributions,
-            "top_factors": top_factors,
-            "model": "IsolationForest",
-            "feature_count": len(self.feature_names),
+            "risk_level": risk_level,
+            "action": actions.get(risk_level, "unknown"),
+            "factors": top_factors,
+            "model": "weighted_history",
+            "formula": "min((new_device*0.4 + new_country*0.4 + rapid_attempts*0.6 + abnormal_time*0.2) / 1.6, 1.0)",
         }
-
-    def add_training_sample(self, features: Dict[str, float]):
-        """Add a new login event to training data for incremental learning"""
-        self.training_data.append(features)
-        # Retrain every 50 new samples
-        if len(self.training_data) % 50 == 0:
-            self._train_model()

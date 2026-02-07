@@ -22,6 +22,7 @@ class RiskScoreRequest(BaseModel):
     wallet_address: str
     ip_address: str = "0.0.0.0"
     user_agent: str = ""
+    geo_country: Optional[str] = None
     current_hour: Optional[int] = None
 
 
@@ -43,21 +44,22 @@ class TimelinePoint(BaseModel):
 # ─── Endpoints ──────────────────────────────────────────────────────
 
 @router.post("/score", response_model=RiskScoreResponse)
-async def compute_risk_score(req: RiskScoreRequest):
+async def compute_risk_score(req: RiskScoreRequest, db: AsyncSession = Depends(get_db)):
     """Compute risk score for a login attempt (standalone, without auth flow)"""
     engine = RiskEngine.get_instance()
-    features = engine.compute_features(
+    risk_score, risk_level, explanation = await engine.score(
+        db=db,
+        wallet_address=req.wallet_address,
         ip_address=req.ip_address,
         user_agent=req.user_agent,
-        wallet_address=req.wallet_address,
+        geo_country=req.geo_country,
         current_hour=req.current_hour,
     )
-    risk_score, risk_level, explanation = engine.score(features)
 
     return RiskScoreResponse(
         risk_score=risk_score,
         risk_level=risk_level,
-        features=features,
+        features={f["feature"]: f["value"] for f in explanation.get("factors", [])},
         explanation=explanation,
     )
 

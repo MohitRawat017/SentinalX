@@ -1,5 +1,5 @@
 # SentinelX Backend Dependencies
-# Verified minimal set for Python 3.11+
+# Minimal set - no ML dependencies
 
 # Core Framework
 fastapi==0.109.2
@@ -14,13 +14,7 @@ eth-account==0.11.3
 
 # Database
 sqlalchemy==2.0.27
-aiosqlite==0.19.0
 asyncpg==0.29.0
-
-# ML/Risk Engine
-numpy==1.26.4
-pandas==2.2.1
-scikit-learn==1.4.1.post1
 
 # LLM (OpenRouter) - optional, graceful fallback
 openai==1.12.0

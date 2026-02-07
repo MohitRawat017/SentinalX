@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
-from app.routers import auth, risk, guard, audit, simulation, dashboard
+from app.routers import auth, risk, guard, audit, simulation, dashboard, chat
 from app.services.merkle import MerkleBatcher
 
 
@@ -37,10 +37,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — parse comma-separated FRONTEND_URL
+_origins = [o.strip().rstrip("/") for o in settings.FRONTEND_URL.split(",") if o.strip()]
+_origins.extend(["http://localhost:5173", "http://localhost:3000"])
+_origins = list(set(_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,6 +57,7 @@ app.include_router(guard.router, prefix="/guard", tags=["GuardLayer"])
 app.include_router(audit.router, prefix="/audit", tags=["Audit Trail"])
 app.include_router(simulation.router, prefix="/simulation", tags=["Simulation"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(chat.router, prefix="/chat", tags=["Chat"])
 
 
 @app.get("/")
@@ -68,6 +73,7 @@ async def root():
             "Merkle Audit Trail",
             "Live Dashboard",
             "Attack Simulation",
+            "Real-time Chat",
         ],
     }
 

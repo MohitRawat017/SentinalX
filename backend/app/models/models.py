@@ -2,11 +2,9 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, String, Float, Boolean, DateTime, Text, Integer, JSON, create_engine
+    Column, String, Float, Boolean, DateTime, Text, Integer, JSON
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker as async_sessionmaker
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -88,3 +86,21 @@ class Nonce(Base):
     used = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    sender_wallet = Column(String, nullable=False, index=True)
+    receiver_wallet = Column(String, nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    content_hash = Column(String, nullable=False)
+    is_scanned = Column(Boolean, default=True)
+    risk_detected = Column(Boolean, default=False)
+    risk_categories = Column(JSON, nullable=True)
+    redacted = Column(Boolean, default=False)
+    redacted_content = Column(Text, nullable=True)
+    user_override = Column(Boolean, default=False)
+    event_hash = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)

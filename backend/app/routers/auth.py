@@ -123,15 +123,13 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
 
     # ─── AI Risk Scoring ─────────────────────────────────
     risk_engine = RiskEngine.get_instance()
-    features = risk_engine.compute_features(
+    risk_score, risk_level, risk_explanation = await risk_engine.score(
+        db=db,
+        wallet_address=wallet,
         ip_address=ip_address,
         user_agent=user_agent,
-        wallet_address=wallet,
+        geo_country=req.geo_country,
     )
-    risk_score, risk_level, risk_explanation = risk_engine.score(features)
-
-    # Add to training data for incremental learning
-    risk_engine.add_training_sample(features)
 
     step_up_required = risk_score >= settings.RISK_MEDIUM
 
@@ -172,7 +170,7 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
         geo_city=req.geo_city,
         risk_score=risk_score,
         risk_level=risk_level,
-        risk_features=features,
+        risk_features=risk_explanation.get("factors"),
         step_up_required=step_up_required,
         event_hash=event_hash,
         timestamp=datetime.utcnow(),
