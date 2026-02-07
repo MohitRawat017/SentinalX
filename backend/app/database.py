@@ -4,7 +4,26 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.models.models import Base
 
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG)
+
+def get_database_url() -> str:
+    """
+    Convert DATABASE_URL to asyncpg-compatible format.
+    Render provides postgres:// but SQLAlchemy asyncpg needs postgresql+asyncpg://
+    """
+    url = settings.DATABASE_URL
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+engine = create_async_engine(
+    get_database_url(),
+    echo=settings.DEBUG,
+    pool_size=5,
+    max_overflow=10,
+)
 
 AsyncSessionLocal = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

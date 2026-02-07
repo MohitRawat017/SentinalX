@@ -102,9 +102,12 @@ Only respond with the JSON, nothing else."""
 
     def __init__(self):
         self.openai_client = None
-        if HAS_OPENAI and settings.OPENAI_API_KEY:
+        if HAS_OPENAI and settings.OPENROUTER_API_KEY:
             try:
-                self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                self.openai_client = OpenAI(
+                    api_key=settings.OPENROUTER_API_KEY,
+                    base_url="https://openrouter.ai/api/v1",
+                )
             except Exception:
                 pass
 
@@ -137,7 +140,7 @@ Only respond with the JSON, nothing else."""
 
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="meta-llama/llama-3.2-3b-instruct:free",
                 messages=[
                     {"role": "system", "content": "You are a data loss prevention security scanner. Respond only with valid JSON."},
                     {"role": "user", "content": self.LLM_PROMPT.format(text=text[:2000])},

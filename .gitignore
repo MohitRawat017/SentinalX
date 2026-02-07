@@ -63,3 +63,8 @@ coverage/
 .cache/
 tmp/
 temp/
+
+# Temp files
+tmpclaude-*
+backend/.env.example
+nul 
