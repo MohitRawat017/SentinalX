@@ -8,24 +8,21 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [authResult, setAuthResult] = useState(null);
-  const [stepUpState, setStepUpState] = useState(null); // { wallet, challenge, hasMetaMask }
+  const [stepUpState, setStepUpState] = useState(null); // { wallet, hasMetaMask, pendingAuth }
   const [stepUpLoading, setStepUpLoading] = useState(false);
   const { setAuth, setEnforcement, addNotification } = useStore();
   const navigate = useNavigate();
 
-  const proceedAfterLogin = (data) => {
+  // Finalize login: sets auth in store and navigates to dashboard
+  const finalizeLogin = (data, enforcementOverride) => {
     setAuth(data.wallet_address, data.token, data.risk_level, data.risk_score);
-    setEnforcement({
+    const enforcement = enforcementOverride || {
       security_status: data.security_status,
       trust_score: data.trust_score,
       locked_until: data.locked_until,
-    });
-    setAuthResult(data);
-    addNotification({
-      type: data.risk_level === 'high' ? 'warning' : 'success',
-      title: 'Authenticated',
-      message: data.message,
-    });
+    };
+    setEnforcement(enforcement);
+    navigate('/dashboard');
   };
 
   const handleStepUp = async () => {
@@ -61,15 +58,13 @@ export default function LoginPage() {
       });
 
       if (verifyRes.data.success) {
-        // Update enforcement with boosted score
-        setEnforcement(verifyRes.data.enforcement);
         addNotification({
           type: 'success',
           title: 'Verification Complete',
           message: `Trust score boosted: ${verifyRes.data.enforcement.previous_score} → ${verifyRes.data.enforcement.trust_score}`,
         });
-        setStepUpState(null);
-        navigate('/dashboard');
+        // NOW finalize login with boosted enforcement
+        finalizeLogin(stepUpState.pendingAuth, verifyRes.data.enforcement);
       }
     } catch (err) {
       console.error('Step-up error:', err);
@@ -84,13 +79,13 @@ export default function LoginPage() {
   };
 
   const skipStepUp = () => {
-    setStepUpState(null);
     addNotification({
       type: 'warning',
       title: 'Step-Up Skipped',
       message: 'Some sensitive actions may require additional verification.',
     });
-    navigate('/dashboard');
+    // Finalize login with original enforcement (step_up_required stays)
+    finalizeLogin(stepUpState.pendingAuth);
   };
 
   const handleWalletLogin = async () => {
@@ -120,13 +115,18 @@ export default function LoginPage() {
         });
 
         if (verifyRes.data.success) {
-          proceedAfterLogin(verifyRes.data);
-
           if (verifyRes.data.step_up_required) {
-            // Intercept: show step-up challenge instead of navigating
-            setStepUpState({ wallet, hasMetaMask: true });
+            // DON'T authenticate yet — show step-up challenge first
+            setAuthResult(verifyRes.data);
+            setStepUpState({ wallet, hasMetaMask: true, pendingAuth: verifyRes.data });
           } else {
-            setTimeout(() => navigate('/dashboard'), 1500);
+            addNotification({
+              type: verifyRes.data.risk_level === 'high' ? 'warning' : 'success',
+              title: 'Authenticated',
+              message: verifyRes.data.message,
+            });
+            setAuthResult(verifyRes.data);
+            finalizeLogin(verifyRes.data);
           }
         } else {
           if (verifyRes.data.security_status === 'locked') {
@@ -172,13 +172,18 @@ export default function LoginPage() {
       });
 
       if (verifyRes.data.success) {
-        proceedAfterLogin(verifyRes.data);
-
         if (verifyRes.data.step_up_required) {
-          // Intercept: show step-up challenge
-          setStepUpState({ wallet: demoWallet, hasMetaMask: false });
+          // DON'T authenticate yet — show step-up challenge first
+          setAuthResult(verifyRes.data);
+          setStepUpState({ wallet: demoWallet, hasMetaMask: false, pendingAuth: verifyRes.data });
         } else {
-          setTimeout(() => navigate('/dashboard'), 1500);
+          addNotification({
+            type: 'success',
+            title: 'Demo Login Successful',
+            message: `Risk Score: ${verifyRes.data.risk_score} (${verifyRes.data.risk_level})`,
+          });
+          setAuthResult(verifyRes.data);
+          finalizeLogin(verifyRes.data);
         }
       } else if (verifyRes.data.security_status === 'locked') {
         setError(`Account locked: ${verifyRes.data.message}`);
