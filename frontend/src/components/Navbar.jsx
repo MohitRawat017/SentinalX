@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import useStore from '../store';
-import { HiShieldCheck, HiChartBar, HiChatBubbleLeftRight, HiLink, HiBeaker, HiArrowRightOnRectangle } from 'react-icons/hi2';
+import { HiShieldCheck, HiChartBar, HiChatBubbleLeftRight, HiLink, HiBeaker, HiArrowRightOnRectangle, HiLockClosed, HiExclamationTriangle } from 'react-icons/hi2';
 
 export default function Navbar() {
-  const { isAuthenticated, wallet, riskLevel, dashboardData, logout } = useStore();
+  const { isAuthenticated, wallet, riskLevel, dashboardData, securityStatus, logout } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -66,6 +66,22 @@ export default function Navbar() {
           <div className="flex items-center gap-3">
             {isAuthenticated && wallet && (
               <>
+                {/* Enforcement Status Indicator */}
+                {securityStatus && securityStatus !== 'active' && (
+                  <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${
+                    securityStatus === 'locked' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                    securityStatus === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                    'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                  }`}>
+                    {securityStatus === 'locked' ? (
+                      <><HiLockClosed className="w-3 h-3" /> LOCKED</>
+                    ) : securityStatus === 'restricted' ? (
+                      <><HiLockClosed className="w-3 h-3" /> RESTRICTED</>
+                    ) : (
+                      <><HiExclamationTriangle className="w-3 h-3" /> STEP-UP</>
+                    )}
+                  </div>
+                )}
                 {dashboardData?.trust_score && (
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
                     dashboardData.trust_score.level === 'trusted' ? 'bg-emerald-500/10 border-emerald-500/30' :

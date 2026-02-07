@@ -19,6 +19,7 @@ from app.models.models import User, LoginEvent, Nonce
 from app.services.jwt_utils import create_access_token, verify_token, get_wallet_from_token
 from app.services.risk_engine import RiskEngine
 from app.services.merkle import MerkleBatcher
+from app.services.enforcement import SecurityEnforcement
 
 router = APIRouter()
 
@@ -55,6 +56,11 @@ class AuthResponse(BaseModel):
     step_up_required: bool = False
     event_hash: Optional[str] = None
     message: str = ""
+    # Enforcement fields
+    security_status: Optional[str] = None  # active, step_up_required, restricted, locked
+    trust_score: Optional[int] = None
+    locked_until: Optional[str] = None
+    session_restricted: bool = False
 
 
 class ChallengeRequest(BaseModel):
@@ -185,12 +191,42 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
         "risk_level": risk_level,
     })
 
+    # ─── Security Enforcement ─────────────────────────────
+    enforcer = SecurityEnforcement.get_instance()
+    enforcement = await enforcer.evaluate_and_enforce(db, wallet)
+    security_status = enforcement["security_status"]
+    is_locked = security_status == "locked"
+    is_restricted = security_status in ("restricted", "locked")
+
+    # If locked, deny login entirely
+    if is_locked:
+        return AuthResponse(
+            success=False,
+            wallet_address=wallet.lower(),
+            risk_score=risk_score,
+            risk_level=risk_level,
+            security_status=security_status,
+            trust_score=enforcement["trust_score"],
+            locked_until=enforcement["locked_until"],
+            message=f"Account temporarily locked. {enforcement['cooldown_reason'] or 'Suspicious activity detected.'}",
+        )
+
+    # Merge enforcement step-up with login risk step-up
+    enforce_step_up = security_status == "step_up_required" or step_up_required
+
     # ─── Issue JWT ───────────────────────────────────────
     token = create_access_token(data={
         "sub": wallet.lower(),
         "risk_level": risk_level,
         "risk_score": risk_score,
+        "security_status": security_status,
     })
+
+    msg_parts = [f"Welcome! Risk level: {risk_level}"]
+    if enforce_step_up:
+        msg_parts.append("Step-up verification required.")
+    if is_restricted:
+        msg_parts.append("Some actions are restricted due to elevated risk.")
 
     return AuthResponse(
         success=True,
@@ -199,11 +235,13 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
         risk_score=risk_score,
         risk_level=risk_level,
         risk_explanation=risk_explanation,
-        step_up_required=step_up_required,
+        step_up_required=enforce_step_up,
         event_hash=event_hash,
-        message=f"Welcome! Risk level: {risk_level}" + (
-            " — Step-up verification required." if step_up_required else ""
-        ),
+        security_status=security_status,
+        trust_score=enforcement["trust_score"],
+        locked_until=enforcement["locked_until"],
+        session_restricted=is_restricted,
+        message=" — ".join(msg_parts),
     )
 
 
@@ -242,6 +280,26 @@ async def get_session(authorization: Optional[str] = Header(None)):
 async def logout():
     """Logout — client should discard the JWT"""
     return {"success": True, "message": "Session ended. Please discard your token."}
+
+
+@router.get("/security-state")
+async def get_security_state(
+    wallet_address: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current security enforcement state for a wallet."""
+    enforcer = SecurityEnforcement.get_instance()
+    return await enforcer.get_security_state(db, wallet_address)
+
+
+@router.post("/security-state/refresh")
+async def refresh_security_state(
+    wallet_address: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Recompute and return the security enforcement state."""
+    enforcer = SecurityEnforcement.get_instance()
+    return await enforcer.evaluate_and_enforce(db, wallet_address)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────

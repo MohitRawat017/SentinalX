@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.models import LoginEvent, GuardEvent, TransactionEvent
 from app.services.merkle import MerkleBatcher
+from app.services.enforcement import SecurityEnforcement
 from app.config import settings
 
 router = APIRouter()
@@ -65,6 +66,12 @@ async def get_overview(
     # Trust score computation
     trust_score = _compute_trust_score(login_events, guard_events, tx_events)
 
+    # Enforcement state
+    enforcement = None
+    if wallet_address:
+        enforcer = SecurityEnforcement.get_instance()
+        enforcement = await enforcer.evaluate_and_enforce(db, wallet_address)
+
     return {
         "stats": {
             "total_logins": total_logins,
@@ -83,6 +90,7 @@ async def get_overview(
             "total_eth_transferred": round(sum(e.amount_eth for e in tx_events if e.status == "completed"), 6),
         },
         "trust_score": trust_score,
+        "enforcement": enforcement,
         "risk_timeline": [
             {
                 "timestamp": e.timestamp.isoformat() + "Z" if e.timestamp else None,

@@ -8,6 +8,11 @@ const useStore = create((set, get) => ({
   riskLevel: null,
   riskScore: null,
 
+  // ─── Security Enforcement State ─────────────────────────────
+  securityStatus: 'active',  // active, step_up_required, restricted, locked
+  trustScore: null,
+  lockedUntil: null,
+
   setAuth: (wallet, token, riskLevel, riskScore) => {
     sessionStorage.setItem('sentinelx_token', token);
     sessionStorage.setItem('sentinelx_wallet', wallet);
@@ -17,6 +22,15 @@ const useStore = create((set, get) => ({
       isAuthenticated: true,
       riskLevel,
       riskScore,
+    });
+  },
+
+  setEnforcement: (enforcement) => {
+    if (!enforcement) return;
+    set({
+      securityStatus: enforcement.security_status || 'active',
+      trustScore: enforcement.trust_score ?? null,
+      lockedUntil: enforcement.locked_until || null,
     });
   },
 
@@ -30,6 +44,9 @@ const useStore = create((set, get) => ({
       riskLevel: null,
       riskScore: null,
       dashboardData: null,
+      securityStatus: 'active',
+      trustScore: null,
+      lockedUntil: null,
     });
   },
 

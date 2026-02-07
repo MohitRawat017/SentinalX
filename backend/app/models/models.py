@@ -127,6 +127,19 @@ class Message(Base):
     user_override = Column(Boolean, default=False)
 
 
+class SecurityState(Base):
+    __tablename__ = "security_states"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    wallet_address = Column(String, unique=True, nullable=False, index=True)
+    trust_score = Column(Integer, default=100)
+    security_status = Column(String, default="active")  # active, step_up_required, restricted, locked
+    locked_until = Column(DateTime, nullable=True)
+    cooldown_reason = Column(String, nullable=True)
+    last_evaluated = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class TransactionEvent(Base):
     __tablename__ = "transaction_events"
 

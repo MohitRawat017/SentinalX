@@ -6,10 +6,10 @@ import LoginMap from '../components/LoginMap';
 import StatsCards from '../components/StatsCards';
 import RecentEvents from '../components/RecentEvents';
 import SecurityReport from '../components/SecurityReport';
-import { HiArrowPath, HiBolt, HiShieldCheck } from 'react-icons/hi2';
+import { HiArrowPath, HiBolt, HiShieldCheck, HiLockClosed, HiExclamationTriangle, HiShieldExclamation } from 'react-icons/hi2';
 
 export default function Dashboard() {
-  const { wallet, dashboardData, setDashboardData, setLoading, isLoading, addNotification } = useStore();
+  const { wallet, dashboardData, setDashboardData, setLoading, isLoading, addNotification, setEnforcement } = useStore();
   const [report, setReport] = useState(null);
 
   const fetchDashboard = async () => {
@@ -17,6 +17,10 @@ export default function Dashboard() {
     try {
       const res = await dashboardAPI.overview(wallet);
       setDashboardData(res.data);
+      // Sync enforcement state from dashboard
+      if (res.data.enforcement) {
+        setEnforcement(res.data.enforcement);
+      }
     } catch (err) {
       console.error('Dashboard fetch error:', err);
     }
@@ -26,10 +30,14 @@ export default function Dashboard() {
   const seedDemoData = async () => {
     setLoading(true);
     try {
-      await simulationAPI.run({
+      const simRes = await simulationAPI.run({
         scenario: 'full_demo',
         wallet_address: wallet || '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28',
       });
+      // Sync enforcement from simulation if available
+      if (simRes.data.enforcement) {
+        setEnforcement(simRes.data.enforcement);
+      }
       addNotification({ type: 'success', title: 'Demo Data', message: 'Full demo simulation completed!' });
       await fetchDashboard();
     } catch (err) {
@@ -116,6 +124,28 @@ export default function Dashboard() {
              data?.trust_score?.level === 'monitoring' ? 'MONITORING' :
              data?.trust_score?.level === 'high_risk' ? 'HIGH RISK' : 'N/A'}
           </span>
+
+          {/* Enforcement Status Badge */}
+          {data?.enforcement && data.enforcement.security_status !== 'active' && (
+            <div className={`mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${
+              data.enforcement.security_status === 'locked' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+              data.enforcement.security_status === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+              'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+            }`}>
+              {data.enforcement.security_status === 'locked' ? (
+                <><HiLockClosed className="w-3 h-3" /> LOCKED</>
+              ) : data.enforcement.security_status === 'restricted' ? (
+                <><HiShieldExclamation className="w-3 h-3" /> RESTRICTED</>
+              ) : (
+                <><HiExclamationTriangle className="w-3 h-3" /> STEP-UP</>
+              )}
+            </div>
+          )}
+          {data?.enforcement && data.enforcement.security_status === 'active' && (
+            <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <HiShieldCheck className="w-3 h-3" /> ACTIVE
+            </div>
+          )}
         </div>
 
         {/* Stats Cards in remaining 3 cols */}

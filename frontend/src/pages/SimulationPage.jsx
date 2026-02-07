@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store';
 import { simulationAPI } from '../api';
-import { HiBolt, HiPlay, HiShieldExclamation, HiUser, HiDocumentText, HiCheck, HiFire, HiCurrencyDollar, HiBanknotes } from 'react-icons/hi2';
+import { HiBolt, HiPlay, HiShieldExclamation, HiUser, HiDocumentText, HiCheck, HiFire, HiCurrencyDollar, HiBanknotes, HiLockClosed, HiExclamationTriangle, HiShieldCheck } from 'react-icons/hi2';
 
 export default function SimulationPage() {
-  const { wallet, addNotification } = useStore();
+  const { wallet, addNotification, setEnforcement } = useStore();
   const [scenarios, setScenarios] = useState([]);
   const [running, setRunning] = useState(null);
   const [results, setResults] = useState(null);
@@ -25,6 +25,10 @@ export default function SimulationPage() {
       });
 
       setResults(res.data);
+      // Sync enforcement state from simulation response
+      if (res.data.enforcement) {
+        setEnforcement(res.data.enforcement);
+      }
       addNotification({
         type: 'success',
         title: 'Simulation Complete',
@@ -106,6 +110,34 @@ export default function SimulationPage() {
           <h3 className="text-lg font-semibold text-white mb-4">
             📊 Simulation Results — <span className="text-blue-400">{results.scenario}</span>
           </h3>
+
+          {/* Enforcement State after simulation */}
+          {(results.enforcement || results.results?.enforcement) && (() => {
+            const enf = results.enforcement || results.results?.enforcement;
+            const isActive = enf.security_status === 'active';
+            const isStepUp = enf.security_status === 'step_up_required';
+            const bgClass = isActive ? 'bg-emerald-500/10 border-emerald-500/30' :
+              isStepUp ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-red-500/10 border-red-500/30';
+            const textClass = isActive ? 'text-emerald-400' : isStepUp ? 'text-yellow-400' : 'text-red-400';
+            return (
+              <div className={`mb-4 p-4 rounded-lg border ${bgClass}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {isActive ? <HiShieldCheck className={`w-5 h-5 ${textClass}`} /> :
+                   isStepUp ? <HiExclamationTriangle className={`w-5 h-5 ${textClass}`} /> :
+                   <HiLockClosed className={`w-5 h-5 ${textClass}`} />}
+                  <span className={`text-sm font-bold ${textClass}`}>
+                    Enforcement: {enf.security_status.replace('_', ' ').toUpperCase()}
+                  </span>
+                  <span className={`text-xs ml-auto font-mono ${textClass}`}>
+                    Trust: {enf.trust_score}/100
+                  </span>
+                </div>
+                {enf.cooldown_reason && (
+                  <p className="text-xs text-gray-400 mt-1">{enf.cooldown_reason}</p>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Full demo has special structure */}
           {results.scenario === 'full_demo' && results.results?.summary && (

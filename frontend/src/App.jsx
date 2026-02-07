@@ -8,6 +8,47 @@ import Dashboard from './pages/Dashboard';
 import ChatPage from './pages/ChatPage';
 import AuditPage from './pages/AuditPage';
 import SimulationPage from './pages/SimulationPage';
+import { HiShieldExclamation, HiLockClosed, HiExclamationTriangle } from 'react-icons/hi2';
+
+function EnforcementBanner() {
+  const { securityStatus, lockedUntil } = useStore();
+
+  if (securityStatus === 'active') return null;
+
+  const config = {
+    step_up_required: {
+      icon: HiExclamationTriangle,
+      bg: 'bg-yellow-500/10 border-yellow-500/30',
+      text: 'text-yellow-400',
+      message: 'Step-up verification required. Some sensitive actions need wallet re-confirmation.',
+    },
+    restricted: {
+      icon: HiShieldExclamation,
+      bg: 'bg-red-500/10 border-red-500/30',
+      text: 'text-red-400',
+      message: 'Suspicious behavior detected. SentinelX has temporarily restricted sensitive actions to protect your assets.',
+    },
+    locked: {
+      icon: HiLockClosed,
+      bg: 'bg-red-500/10 border-red-500/30',
+      text: 'text-red-400',
+      message: `Account temporarily locked.${lockedUntil ? ` Unlocks at ${new Date(lockedUntil).toLocaleTimeString()}.` : ''}`,
+    },
+  };
+
+  const c = config[securityStatus];
+  if (!c) return null;
+  const Icon = c.icon;
+
+  return (
+    <div className={`border-b ${c.bg} px-4 py-2`}>
+      <div className="max-w-7xl mx-auto flex items-center gap-2">
+        <Icon className={`w-4 h-4 ${c.text} flex-shrink-0`} />
+        <span className={`text-sm font-medium ${c.text}`}>{c.message}</span>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const { isAuthenticated } = useStore();
@@ -30,6 +71,7 @@ function App() {
   return (
     <div className="min-h-screen animated-gradient">
       <Navbar />
+      <EnforcementBanner />
       <Notifications />
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Routes>

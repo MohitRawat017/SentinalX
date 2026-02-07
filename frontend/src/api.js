@@ -25,6 +25,8 @@ export const authAPI = {
   getSession: () => api.get('/auth/session'),
   challenge: (data) => api.post('/auth/challenge', data),
   logout: () => api.post('/auth/logout'),
+  securityState: (wallet) => api.get('/auth/security-state', { params: { wallet_address: wallet } }),
+  refreshSecurityState: (wallet) => api.post('/auth/security-state/refresh', null, { params: { wallet_address: wallet } }),
 };
 
 // ─── Risk ───────────────────────────────────────────────────────

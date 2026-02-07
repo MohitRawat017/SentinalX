@@ -8,7 +8,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [authResult, setAuthResult] = useState(null);
-  const { setAuth, addNotification } = useStore();
+  const { setAuth, setEnforcement, addNotification } = useStore();
   const navigate = useNavigate();
 
   const handleWalletLogin = async () => {
@@ -44,6 +44,11 @@ export default function LoginPage() {
             verifyRes.data.risk_level,
             verifyRes.data.risk_score
           );
+          setEnforcement({
+            security_status: verifyRes.data.security_status,
+            trust_score: verifyRes.data.trust_score,
+            locked_until: verifyRes.data.locked_until,
+          });
           setAuthResult(verifyRes.data);
           addNotification({
             type: verifyRes.data.risk_level === 'high' ? 'warning' : 'success',
@@ -52,7 +57,13 @@ export default function LoginPage() {
           });
           setTimeout(() => navigate('/dashboard'), 1500);
         } else {
-          setError(verifyRes.data.message);
+          // Enforcement lockout
+          if (verifyRes.data.security_status === 'locked') {
+            setError(`Account locked: ${verifyRes.data.message}`);
+            setAuthResult(verifyRes.data);
+          } else {
+            setError(verifyRes.data.message);
+          }
         }
       } else {
         await handleDemoLogin();
@@ -96,6 +107,11 @@ export default function LoginPage() {
           verifyRes.data.risk_level,
           verifyRes.data.risk_score
         );
+        setEnforcement({
+          security_status: verifyRes.data.security_status,
+          trust_score: verifyRes.data.trust_score,
+          locked_until: verifyRes.data.locked_until,
+        });
         setAuthResult(verifyRes.data);
         addNotification({
           type: 'success',
@@ -103,6 +119,9 @@ export default function LoginPage() {
           message: `Risk Score: ${verifyRes.data.risk_score} (${verifyRes.data.risk_level})`,
         });
         setTimeout(() => navigate('/dashboard'), 1500);
+      } else if (verifyRes.data.security_status === 'locked') {
+        setError(`Account locked: ${verifyRes.data.message}`);
+        setAuthResult(verifyRes.data);
       }
     } catch (err) {
       setError('Backend not reachable. Please start the FastAPI server first.');
@@ -142,16 +161,40 @@ export default function LoginPage() {
 
           {/* Auth Result */}
           {authResult && (
-            <div className="landing-success">
+            <div className={`landing-success ${authResult.security_status === 'locked' ? '!border-red-500/30 !bg-red-500/5' : ''}`}>
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="text-sm font-medium text-emerald-400">Authenticated</span>
+                <div className={`w-2 h-2 rounded-full ${
+                  authResult.security_status === 'locked' ? 'bg-red-500' :
+                  authResult.security_status === 'restricted' ? 'bg-yellow-500' : 'bg-emerald-500'
+                }`} />
+                <span className={`text-sm font-medium ${
+                  authResult.security_status === 'locked' ? 'text-red-400' :
+                  authResult.security_status === 'restricted' ? 'text-yellow-400' : 'text-emerald-400'
+                }`}>
+                  {authResult.security_status === 'locked' ? 'Account Locked' :
+                   authResult.security_status === 'restricted' ? 'Session Restricted' : 'Authenticated'}
+                </span>
               </div>
               <div className="space-y-1 text-xs text-gray-400">
                 <p>Risk Score: <span className="text-white font-mono">{authResult.risk_score}</span></p>
                 <p>Risk Level: <span className={`font-medium ${authResult.risk_level === 'low' ? 'text-emerald-400' :
                   authResult.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
                   }`}>{authResult.risk_level?.toUpperCase()}</span></p>
+                {authResult.trust_score != null && (
+                  <p>Trust Score: <span className={`font-bold ${
+                    authResult.trust_score >= 80 ? 'text-emerald-400' :
+                    authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>{authResult.trust_score}/100</span></p>
+                )}
+                {authResult.security_status && authResult.security_status !== 'active' && (
+                  <p>Status: <span className={`font-medium ${
+                    authResult.security_status === 'locked' ? 'text-red-400' :
+                    authResult.security_status === 'restricted' ? 'text-red-400' : 'text-yellow-400'
+                  }`}>{authResult.security_status.replace('_', ' ').toUpperCase()}</span></p>
+                )}
+                {authResult.locked_until && (
+                  <p className="text-red-400">Unlocks: {new Date(authResult.locked_until).toLocaleTimeString()}</p>
+                )}
               </div>
             </div>
           )}

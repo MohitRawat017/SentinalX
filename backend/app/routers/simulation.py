@@ -19,6 +19,7 @@ from app.services.risk_engine import RiskEngine
 from app.services.guard_layer import GuardLayer
 from app.services.transaction_risk import TransactionRiskEngine
 from app.services.merkle import MerkleBatcher
+from app.services.enforcement import SecurityEnforcement
 
 router = APIRouter()
 
@@ -97,11 +98,16 @@ async def run_simulation(req: SimulationRequest, db: AsyncSession = Depends(get_
     else:
         return {"error": f"Unknown scenario: {req.scenario}"}
 
+    # Trigger enforcement pipeline after simulation events
+    enforcer = SecurityEnforcement.get_instance()
+    enforcement = await enforcer.evaluate_and_enforce(db, wallet)
+
     return {
         "scenario": req.scenario,
         "results": results,
         "count": len(results) if isinstance(results, list) else 1,
         "wallet": wallet,
+        "enforcement": enforcement,
     }
 
 
@@ -393,10 +399,15 @@ async def _simulate_full_demo(wallet: str, db: AsyncSession):
             "event_count": batch["event_count"],
         }
 
+    # Trigger enforcement after full demo
+    enforcer = SecurityEnforcement.get_instance()
+    enforcement = await enforcer.evaluate_and_enforce(db, wallet)
+
     return {
         "phases": results,
         "total_events": len(results),
         "merkle_batch": batch_info,
+        "enforcement": enforcement,
         "summary": f"Demo complete: {len(normal)} normal logins, {len(suspicious)} suspicious logins, {len(leaks)} data leak attempts, {len(risky_tx)} risky transactions, {len(burst)} burst attacks.",
     }
 

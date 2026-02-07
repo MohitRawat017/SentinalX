@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models.models import TransactionEvent
 from app.services.transaction_risk import TransactionRiskEngine, COOLDOWN_MINUTES
 from app.services.merkle import MerkleBatcher
+from app.services.enforcement import SecurityEnforcement
 
 router = APIRouter()
 
@@ -41,6 +42,26 @@ async def evaluate_transaction(
     db: AsyncSession = Depends(get_db),
 ):
     """Evaluate risk before an ETH transfer. Returns risk score and enforcement action."""
+    # Check security state — deny if locked/restricted
+    enforcer = SecurityEnforcement.get_instance()
+    allowed, reason = await enforcer.check_action_allowed(db, req.sender_wallet, "transfer")
+    if not allowed:
+        return {
+            "transaction_id": None,
+            "risk_score": 1.0,
+            "risk_level": "high",
+            "display_score": 0,
+            "action": reason,
+            "step_up_required": False,
+            "blocked": True,
+            "cooldown_minutes": 30,
+            "in_cooldown": False,
+            "factors": [],
+            "event_hash": None,
+            "status": "blocked",
+            "enforcement_blocked": True,
+        }
+
     engine = TransactionRiskEngine.get_instance()
     risk_score, risk_level, explanation = await engine.evaluate(
         db=db,
