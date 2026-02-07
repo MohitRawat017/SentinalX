@@ -133,6 +133,7 @@ class SecurityState(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     wallet_address = Column(String, unique=True, nullable=False, index=True)
     trust_score = Column(Integer, default=100)
+    trust_bonus = Column(Integer, default=0)  # accumulated bonus from step-up verifications
     security_status = Column(String, default="active")  # active, step_up_required, restricted, locked
     locked_until = Column(DateTime, nullable=True)
     cooldown_reason = Column(String, nullable=True)

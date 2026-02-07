@@ -68,17 +68,22 @@ class SecurityEnforcement:
         # 2. Compute trust score
         trust_score = self._compute_trust_score(login_events, guard_events, tx_events)
 
+        # 2b. Add persisted step-up bonus (survives re-evaluation)
+        existing = await db.execute(
+            select(SecurityState).where(SecurityState.wallet_address == w)
+        )
+        existing_state = existing.scalar_one_or_none()
+        bonus = (existing_state.trust_bonus or 0) if existing_state else 0
+        trust_score = min(100, trust_score + bonus)
+
         # 3. Determine enforcement status
         now = datetime.utcnow()
         security_status, cooldown_reason, locked_until = self._determine_status(
             trust_score, login_events, tx_events, now,
         )
 
-        # 4. Upsert SecurityState
-        result = await db.execute(
-            select(SecurityState).where(SecurityState.wallet_address == w)
-        )
-        state = result.scalar_one_or_none()
+        # 4. Upsert SecurityState (reuse existing_state from bonus lookup)
+        state = existing_state
 
         if state is None:
             state = SecurityState(
@@ -122,7 +127,8 @@ class SecurityEnforcement:
     ) -> dict:
         """
         Called after successful step-up verification (wallet re-sign).
-        Boosts trust score and may transition status back to 'active'.
+        Accumulates a trust_bonus that persists across re-evaluations,
+        then recomputes the effective trust score.
         """
         w = wallet_address.lower()
         now = datetime.utcnow()
@@ -133,7 +139,6 @@ class SecurityEnforcement:
         state = result.scalar_one_or_none()
 
         if state is None:
-            # No existing state → already trusted
             return {
                 "trust_score": 100,
                 "security_status": "active",
@@ -143,7 +148,9 @@ class SecurityEnforcement:
             }
 
         old_score = state.trust_score
-        new_score = min(100, state.trust_score + boost)
+        # Accumulate bonus (persists across evaluate_and_enforce calls)
+        state.trust_bonus = min(40, (state.trust_bonus or 0) + boost)  # cap bonus at 40
+        new_score = min(100, old_score + boost)
         state.trust_score = new_score
 
         # Re-determine status from boosted score
