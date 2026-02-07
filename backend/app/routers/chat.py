@@ -7,7 +7,7 @@ All message sending happens through the WebSocket.
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query
@@ -224,6 +224,7 @@ async def handle_send_message(ws: WebSocket, wallet: str, data: dict, force: boo
         "risk_detected": scan_result["is_risky"],
         "user_override": force and scan_result["is_risky"],
         "timestamp": msg.created_at.isoformat() + "Z",
+        "expires_at": msg.expires_at.isoformat() + "Z" if msg.expires_at else None,
         "is_delivered": False,
         "is_read": False,
     }
@@ -304,6 +305,7 @@ async def get_conversations(
     conv_ids = [row[0] for row in result.all()]
 
     conversations = []
+    now = datetime.utcnow()
     for conv_id in conv_ids:
         # Get peer
         peer_result = await db.execute(
@@ -314,29 +316,31 @@ async def get_conversations(
         )
         peer = peer_result.scalar()
 
-        # Latest message
+        # Latest non-expired message
         msg_result = await db.execute(
             select(Message)
-            .where(Message.conversation_id == conv_id)
+            .where(Message.conversation_id == conv_id, Message.expires_at > now)
             .order_by(desc(Message.created_at))
             .limit(1)
         )
         latest = msg_result.scalar()
 
-        # Message count
+        # Non-expired message count
         count_result = await db.execute(
             select(func.count()).select_from(Message).where(
-                Message.conversation_id == conv_id
+                Message.conversation_id == conv_id,
+                Message.expires_at > now,
             )
         )
         msg_count = count_result.scalar() or 0
 
-        # Unread count
+        # Unread count (non-expired)
         unread_result = await db.execute(
             select(func.count()).select_from(Message).where(
                 Message.conversation_id == conv_id,
                 Message.sender_wallet != w,
                 Message.is_read == False,
+                Message.expires_at > now,
             )
         )
         unread_count = unread_result.scalar() or 0
@@ -362,10 +366,14 @@ async def get_messages(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get messages in a conversation."""
+    """Get non-expired messages in a conversation."""
+    now = datetime.utcnow()
     result = await db.execute(
         select(Message)
-        .where(Message.conversation_id == conversation_id)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.expires_at > now,
+        )
         .order_by(desc(Message.created_at))
         .limit(limit)
     )
@@ -384,6 +392,7 @@ async def get_messages(
                 "is_delivered": m.is_delivered,
                 "is_read": m.is_read,
                 "timestamp": m.created_at.isoformat() + "Z" if m.created_at else None,
+                "expires_at": m.expires_at.isoformat() + "Z" if m.expires_at else None,
             }
             for m in reversed(messages)
         ],

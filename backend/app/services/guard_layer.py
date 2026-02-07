@@ -12,7 +12,7 @@ from app.config import settings
 
 # Attempt to import OpenAI — graceful fallback if not available
 try:
-    from openai import OpenAI
+    from openai import AsyncOpenAI
     HAS_OPENAI = True
 except ImportError:
     HAS_OPENAI = False
@@ -127,7 +127,7 @@ Text to redact:
         self.openai_client = None
         if HAS_OPENAI and settings.OPENROUTER_API_KEY:
             try:
-                self.openai_client = OpenAI(
+                self.openai_client = AsyncOpenAI(
                     api_key=settings.OPENROUTER_API_KEY,
                     base_url="https://openrouter.ai/api/v1",
                 )
@@ -162,7 +162,7 @@ Text to redact:
             }
 
         try:
-            response = self.openai_client.chat.completions.create(
+            response = await self.openai_client.chat.completions.create(
                 model="meta-llama/llama-3.2-3b-instruct:free",
                 messages=[
                     {"role": "system", "content": "You are a data loss prevention security scanner. Respond only with valid JSON."},
@@ -247,7 +247,7 @@ Text to redact:
         # Try LLM redaction first
         if self.openai_client:
             try:
-                response = self.openai_client.chat.completions.create(
+                response = await self.openai_client.chat.completions.create(
                     model="meta-llama/llama-3.2-3b-instruct:free",
                     messages=[
                         {"role": "system", "content": "You are a data redaction engine. Return only the redacted text."},

@@ -3,13 +3,36 @@ SentinelX — Web3 Adaptive Security Platform
 Main FastAPI Application
 """
 import asyncio
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, AsyncSessionLocal
 from app.routers import auth, risk, guard, audit, simulation, dashboard, chat
 from app.services.merkle import MerkleBatcher
+from sqlalchemy import delete
+from app.models.models import Message
+
+
+async def cleanup_expired_messages():
+    """Background task: delete expired messages every 60 seconds."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    delete(Message).where(Message.expires_at <= datetime.utcnow())
+                )
+                if result.rowcount > 0:
+                    await db.commit()
+                    print(f"Cleaned up {result.rowcount} expired messages")
+                else:
+                    await db.rollback()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Message cleanup error: {e}")
 
 
 @asynccontextmanager
@@ -19,13 +42,20 @@ async def lifespan(app: FastAPI):
     await init_db()
     # Start Merkle batcher background task
     batcher = MerkleBatcher.get_instance()
-    task = asyncio.create_task(batcher.run_background())
-    print("🛡️  SentinelX Backend is running")
+    merkle_task = asyncio.create_task(batcher.run_background())
+    # Start expired message cleanup task
+    cleanup_task = asyncio.create_task(cleanup_expired_messages())
+    print("SentinelX Backend is running")
     yield
     # Shutdown
-    task.cancel()
+    merkle_task.cancel()
+    cleanup_task.cancel()
     try:
-        await task
+        await merkle_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await cleanup_task
     except asyncio.CancelledError:
         pass
 

@@ -1,6 +1,6 @@
 """SQLAlchemy database models for SentinelX"""
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import (
     Column, String, Float, Boolean, DateTime, Text, Integer, JSON
 )
@@ -103,6 +103,10 @@ class ConversationParticipant(Base):
     wallet_address = Column(String, nullable=False, index=True)
 
 
+def default_expires_at():
+    return datetime.utcnow() + timedelta(hours=24)
+
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -112,6 +116,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     content_hash = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, default=default_expires_at)
     is_delivered = Column(Boolean, default=False)
     is_read = Column(Boolean, default=False)
     risk_score = Column(Float, default=0.0)

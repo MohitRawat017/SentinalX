@@ -9,6 +9,7 @@ import {
   HiChatBubbleLeftRight,
   HiXMark,
   HiCheck,
+  HiClock,
 } from 'react-icons/hi2';
 
 export default function ChatPage() {
@@ -202,6 +203,7 @@ export default function ChatPage() {
     is_delivered: data.is_delivered || false,
     is_read: data.is_read || false,
     timestamp: data.timestamp,
+    expires_at: data.expires_at || null,
   });
 
   const wsSend = (data) => {
@@ -304,6 +306,16 @@ export default function ChatPage() {
           minute: '2-digit',
         })
       : '';
+
+  const formatTimeLeft = (expiresAt) => {
+    if (!expiresAt) return null;
+    const diff = new Date(expiresAt) - Date.now();
+    if (diff <= 0) return 'expired';
+    const hrs = Math.floor(diff / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    return `${mins}m`;
+  };
 
   const getConvPeer = (convId) => {
     const c = conversations.find((x) => x.conversation_id === convId);
@@ -476,7 +488,7 @@ export default function ChatPage() {
                       {formatAddr(getConvPeer(selectedConv))}
                     </p>
                     <p className="text-xs text-gray-500">
-                      GuardLayer Protected
+                      GuardLayer Protected &middot; Messages expire in 24h
                     </p>
                   </div>
                 </div>
@@ -527,6 +539,12 @@ export default function ChatPage() {
                             {m.risk_detected && !m.redacted && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">
                                 override
+                              </span>
+                            )}
+                            {m.expires_at && (
+                              <span className="flex items-center gap-0.5 text-xs text-gray-400" title={`Expires: ${new Date(m.expires_at).toLocaleString()}`}>
+                                <HiClock className="w-3 h-3" />
+                                {formatTimeLeft(m.expires_at)}
                               </span>
                             )}
                             <span
