@@ -6,7 +6,7 @@ import LoginMap from '../components/LoginMap';
 import StatsCards from '../components/StatsCards';
 import RecentEvents from '../components/RecentEvents';
 import SecurityReport from '../components/SecurityReport';
-import { HiArrowPath, HiBolt } from 'react-icons/hi2';
+import { HiArrowPath, HiBolt, HiShieldCheck } from 'react-icons/hi2';
 
 export default function Dashboard() {
   const { wallet, dashboardData, setDashboardData, setLoading, isLoading, addNotification } = useStore();
@@ -86,8 +86,43 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <StatsCards stats={data?.stats} />
+      {/* Trust Score + Stats Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Trust Score Card */}
+        <div className={`glass-card p-6 border flex flex-col items-center justify-center ${
+          data?.trust_score?.level === 'trusted' ? 'border-emerald-500/30' :
+          data?.trust_score?.level === 'monitoring' ? 'border-yellow-500/30' :
+          data?.trust_score?.level === 'high_risk' ? 'border-red-500/30' : 'border-sentinel-border'
+        }`}>
+          <div className="flex items-center gap-2 mb-2">
+            <HiShieldCheck className={`w-6 h-6 ${
+              data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
+              data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+            }`} />
+            <span className="text-sm font-semibold text-gray-300">Trust Score</span>
+          </div>
+          <p className={`text-4xl font-bold ${
+            data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
+            data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+          }`}>
+            {data?.trust_score?.score ?? '--'}
+          </p>
+          <span className={`text-xs font-medium mt-1 px-2 py-0.5 rounded-full ${
+            data?.trust_score?.level === 'trusted' ? 'bg-emerald-500/20 text-emerald-400' :
+            data?.trust_score?.level === 'monitoring' ? 'bg-yellow-500/20 text-yellow-400' :
+            data?.trust_score?.level === 'high_risk' ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'
+          }`}>
+            {data?.trust_score?.level === 'trusted' ? 'TRUSTED' :
+             data?.trust_score?.level === 'monitoring' ? 'MONITORING' :
+             data?.trust_score?.level === 'high_risk' ? 'HIGH RISK' : 'N/A'}
+          </span>
+        </div>
+
+        {/* Stats Cards in remaining 3 cols */}
+        <div className="lg:col-span-3">
+          <StatsCards stats={data?.stats} />
+        </div>
+      </div>
 
       {/* Security Report */}
       {report && <SecurityReport report={report} />}

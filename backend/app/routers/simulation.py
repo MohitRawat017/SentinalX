@@ -14,9 +14,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.models import LoginEvent, GuardEvent
+from app.models.models import LoginEvent, GuardEvent, TransactionEvent
 from app.services.risk_engine import RiskEngine
 from app.services.guard_layer import GuardLayer
+from app.services.transaction_risk import TransactionRiskEngine
 from app.services.merkle import MerkleBatcher
 
 router = APIRouter()
@@ -64,7 +65,7 @@ WALLETS = [
 
 
 class SimulationRequest(BaseModel):
-    scenario: str  # suspicious_login, normal_login, data_leak, clean_text, burst_attack, full_demo
+    scenario: str  # suspicious_login, normal_login, data_leak, clean_text, burst_attack, risky_transaction, safe_transaction, full_demo
     wallet_address: Optional[str] = None
     count: int = 1
 
@@ -87,6 +88,10 @@ async def run_simulation(req: SimulationRequest, db: AsyncSession = Depends(get_
         results = await _simulate_clean_text(wallet, req.count, db)
     elif req.scenario == "burst_attack":
         results = await _simulate_burst_attack(wallet, db)
+    elif req.scenario == "risky_transaction":
+        results = await _simulate_risky_transaction(wallet, req.count, db)
+    elif req.scenario == "safe_transaction":
+        results = await _simulate_safe_transaction(wallet, req.count, db)
     elif req.scenario == "full_demo":
         results = await _simulate_full_demo(wallet, db)
     else:
@@ -110,7 +115,9 @@ async def list_scenarios():
             {"id": "data_leak", "name": "Data Leak Attempt", "description": "User tries to send sensitive data (credit card, SSN, etc.)"},
             {"id": "clean_text", "name": "Clean Text", "description": "Normal text that passes GuardLayer checks"},
             {"id": "burst_attack", "name": "Burst Attack", "description": "Rapid-fire login attempts simulating a brute force attack"},
-            {"id": "full_demo", "name": "Full Demo", "description": "Complete scenario: normal login -> suspicious login -> data leak -> burst attack"},
+            {"id": "risky_transaction", "name": "Risky Transaction", "description": "High-value ETH transfer to unknown wallet with urgency language"},
+            {"id": "safe_transaction", "name": "Safe Transaction", "description": "Normal ETH transfer to known recipient"},
+            {"id": "full_demo", "name": "Full Demo", "description": "Complete scenario: normal login -> suspicious login -> data leak -> risky transaction -> burst attack"},
         ]
     }
 
@@ -367,9 +374,13 @@ async def _simulate_full_demo(wallet: str, db: AsyncSession):
     leaks = await _simulate_data_leak(wallet, 3, db)
     results.extend([{**r, "phase": "3_data_leak"} for r in leaks])
 
-    # Phase 4: Burst attack
+    # Phase 4: Risky transaction
+    risky_tx = await _simulate_risky_transaction(wallet, 2, db)
+    results.extend([{**r, "phase": "4_risky_tx"} for r in risky_tx])
+
+    # Phase 5: Burst attack
     burst = await _simulate_burst_attack(wallet, db)
-    results.extend([{**r, "phase": "4_burst"} for r in burst])
+    results.extend([{**r, "phase": "5_burst"} for r in burst])
 
     # Force create a Merkle batch
     batcher = MerkleBatcher.get_instance()
@@ -386,5 +397,124 @@ async def _simulate_full_demo(wallet: str, db: AsyncSession):
         "phases": results,
         "total_events": len(results),
         "merkle_batch": batch_info,
-        "summary": f"Demo complete: {len(normal)} normal logins, {len(suspicious)} suspicious logins, {len(leaks)} data leak attempts, {len(burst)} burst attacks.",
+        "summary": f"Demo complete: {len(normal)} normal logins, {len(suspicious)} suspicious logins, {len(leaks)} data leak attempts, {len(risky_tx)} risky transactions, {len(burst)} burst attacks.",
     }
+
+
+async def _simulate_risky_transaction(wallet: str, count: int, db: AsyncSession):
+    """Simulate high-risk ETH transfers."""
+    results = []
+    tx_engine = TransactionRiskEngine.get_instance()
+    batcher = MerkleBatcher.get_instance()
+
+    risky_scenarios = [
+        {"recipient": "0xdead000000000000000000000000000000000001", "amount": 5.0, "context": "Send it NOW, this is urgent! Don't wait, trust me on this."},
+        {"recipient": "0xdead000000000000000000000000000000000002", "amount": 10.0, "context": "Hurry up and send immediately, it's an emergency! Act fast before it's too late."},
+        {"recipient": "0xdead000000000000000000000000000000000003", "amount": 25.0, "context": "This is a once in a lifetime opportunity, send now or miss out forever."},
+    ]
+
+    for i in range(min(count, len(risky_scenarios))):
+        scenario = risky_scenarios[i % len(risky_scenarios)]
+
+        risk_score, risk_level, explanation = await tx_engine.evaluate(
+            db=db,
+            sender_wallet=wallet,
+            recipient_wallet=scenario["recipient"],
+            amount_eth=scenario["amount"],
+            chat_context=scenario["context"],
+        )
+
+        # Amplify for demo
+        risk_score = max(risk_score, 0.65)
+        if risk_score >= 0.6:
+            risk_level = "high"
+
+        event_hash = explanation.get("event_hash", hashlib.sha256(
+            json.dumps({"sim_tx": i, "ts": datetime.utcnow().isoformat()}, sort_keys=True).encode()
+        ).hexdigest())
+
+        tx_event = TransactionEvent(
+            id=str(uuid.uuid4()),
+            sender_wallet=wallet.lower(),
+            recipient_wallet=scenario["recipient"].lower(),
+            amount_eth=scenario["amount"],
+            risk_score=risk_score,
+            risk_level=risk_level,
+            risk_factors={f["feature"]: f["value"] for f in explanation.get("factors", [])},
+            status="blocked",
+            step_up_required=True,
+            cooldown_until=datetime.utcnow() + timedelta(minutes=10),
+            event_hash=event_hash,
+            created_at=datetime.utcnow() - timedelta(minutes=random.randint(0, 30)),
+        )
+        db.add(tx_event)
+        batcher.add_event(event_hash, "tx_sim", {"amount": scenario["amount"], "risk": risk_level})
+
+        results.append({
+            "type": "risky_transaction",
+            "amount_eth": scenario["amount"],
+            "recipient": scenario["recipient"][:10] + "...",
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "status": "blocked",
+            "event_hash": event_hash,
+            "factors": explanation.get("factors", []),
+        })
+
+    await db.commit()
+    return results
+
+
+async def _simulate_safe_transaction(wallet: str, count: int, db: AsyncSession):
+    """Simulate normal, safe ETH transfers."""
+    results = []
+    tx_engine = TransactionRiskEngine.get_instance()
+    batcher = MerkleBatcher.get_instance()
+
+    safe_scenarios = [
+        {"recipient": "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B", "amount": 0.01, "context": "Hey, here's the coffee money from yesterday."},
+        {"recipient": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", "amount": 0.05, "context": "Splitting the dinner bill, thanks!"},
+    ]
+
+    for i in range(min(count, len(safe_scenarios))):
+        scenario = safe_scenarios[i % len(safe_scenarios)]
+
+        risk_score, risk_level, explanation = await tx_engine.evaluate(
+            db=db,
+            sender_wallet=wallet,
+            recipient_wallet=scenario["recipient"],
+            amount_eth=scenario["amount"],
+            chat_context=scenario["context"],
+        )
+
+        event_hash = explanation.get("event_hash", hashlib.sha256(
+            json.dumps({"sim_safe_tx": i, "ts": datetime.utcnow().isoformat()}, sort_keys=True).encode()
+        ).hexdigest())
+
+        tx_event = TransactionEvent(
+            id=str(uuid.uuid4()),
+            sender_wallet=wallet.lower(),
+            recipient_wallet=scenario["recipient"].lower(),
+            amount_eth=scenario["amount"],
+            risk_score=risk_score,
+            risk_level=risk_level,
+            risk_factors={f["feature"]: f["value"] for f in explanation.get("factors", [])},
+            status="completed",
+            event_hash=event_hash,
+            created_at=datetime.utcnow() - timedelta(minutes=random.randint(0, 60)),
+        )
+        db.add(tx_event)
+        batcher.add_event(event_hash, "tx_sim_safe")
+
+        results.append({
+            "type": "safe_transaction",
+            "amount_eth": scenario["amount"],
+            "recipient": scenario["recipient"][:10] + "...",
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "status": "completed",
+            "event_hash": event_hash,
+        })
+
+    await db.commit()
+    return results

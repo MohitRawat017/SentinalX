@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db, AsyncSessionLocal
-from app.routers import auth, risk, guard, audit, simulation, dashboard, chat
+from app.routers import auth, risk, guard, audit, simulation, dashboard, chat, transactions
 from app.services.merkle import MerkleBatcher
 from sqlalchemy import delete
 from app.models.models import Message
@@ -88,6 +88,7 @@ app.include_router(audit.router, prefix="/audit", tags=["Audit Trail"])
 app.include_router(simulation.router, prefix="/simulation", tags=["Simulation"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(transactions.router, prefix="/transactions", tags=["Transactions"])
 
 
 @app.get("/")
@@ -100,6 +101,7 @@ async def root():
             "SIWE Wallet Auth",
             "AI Risk Engine",
             "GuardLayer DLP",
+            "Transaction Risk Engine",
             "Merkle Audit Trail",
             "Live Dashboard",
             "Attack Simulation",

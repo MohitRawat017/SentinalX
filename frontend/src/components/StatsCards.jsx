@@ -1,10 +1,10 @@
 import React from 'react';
-import { HiShieldCheck, HiExclamationTriangle, HiEye, HiLink, HiUsers, HiArrowTrendingUp } from 'react-icons/hi2';
+import { HiShieldCheck, HiExclamationTriangle, HiEye, HiLink, HiUsers, HiArrowTrendingUp, HiCurrencyDollar } from 'react-icons/hi2';
 
 export default function StatsCards({ stats }) {
   if (!stats) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="glass-card p-4 animate-pulse">
             <div className="h-4 bg-gray-700 rounded w-2/3 mb-2" />
@@ -64,10 +64,18 @@ export default function StatsCards({ stats }) {
       bg: 'bg-cyan-500/10',
       border: 'border-cyan-500/20',
     },
+    {
+      label: 'Transactions',
+      value: stats.total_transactions,
+      icon: HiCurrencyDollar,
+      color: 'text-emerald-400',
+      bg: 'bg-emerald-500/10',
+      border: 'border-emerald-500/20',
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
       {cards.map(({ label, value, icon: Icon, color, bg, border }) => (
         <div key={label} className={`glass-card p-4 border ${border} hover:scale-105 transition-transform`}>
           <div className="flex items-center justify-between mb-2">

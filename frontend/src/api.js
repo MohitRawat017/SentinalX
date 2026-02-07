@@ -63,6 +63,16 @@ export const simulationAPI = {
 export const dashboardAPI = {
   overview: (wallet) => api.get('/dashboard/overview', { params: { wallet_address: wallet } }),
   securityReport: (wallet) => api.get('/dashboard/security-report', { params: { wallet_address: wallet } }),
+  trustScore: (wallet) => api.get('/dashboard/trust-score', { params: { wallet_address: wallet } }),
+};
+
+// ─── Transactions ───────────────────────────────────────────────
+export const transactionAPI = {
+  evaluate: (data) => api.post('/transactions/evaluate', data),
+  confirm: (data) => api.post('/transactions/confirm', data),
+  history: (wallet, limit = 50) =>
+    api.get('/transactions/history', { params: { wallet, limit } }),
+  stats: (wallet) => api.get('/transactions/stats', { params: { wallet } }),
 };
 
 // ─── Chat ───────────────────────────────────────────────────────

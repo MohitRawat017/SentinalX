@@ -12,7 +12,7 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.models import LoginEvent, GuardEvent
+from app.models.models import LoginEvent, GuardEvent, TransactionEvent
 from app.services.merkle import MerkleBatcher
 from app.config import settings
 
@@ -39,6 +39,16 @@ async def get_overview(
     guard_result = await db.execute(guard_query)
     guard_events = guard_result.scalars().all()
 
+    # Transaction events
+    tx_query = select(TransactionEvent).order_by(desc(TransactionEvent.created_at)).limit(100)
+    if wallet_address:
+        w = wallet_address.lower()
+        tx_query = tx_query.where(
+            (TransactionEvent.sender_wallet == w) | (TransactionEvent.recipient_wallet == w)
+        )
+    tx_result = await db.execute(tx_query)
+    tx_events = tx_result.scalars().all()
+
     # Merkle stats
     batcher = MerkleBatcher.get_instance()
     merkle_stats = batcher.get_stats()
@@ -51,6 +61,9 @@ async def get_overview(
     total_logins = count_result.scalar() or 0
     risk_scores = [e.risk_score for e in login_events]
     avg_risk = round(sum(risk_scores) / len(risk_scores), 4) if risk_scores else 0
+
+    # Trust score computation
+    trust_score = _compute_trust_score(login_events, guard_events, tx_events)
 
     return {
         "stats": {
@@ -65,7 +78,11 @@ async def get_overview(
             "total_batches": merkle_stats["total_batches"],
             "events_on_chain": merkle_stats["total_events_batched"],
             "pending_events": merkle_stats["pending_events"],
+            "total_transactions": len(tx_events),
+            "blocked_transactions": sum(1 for e in tx_events if e.status == "blocked"),
+            "total_eth_transferred": round(sum(e.amount_eth for e in tx_events if e.status == "completed"), 6),
         },
+        "trust_score": trust_score,
         "risk_timeline": [
             {
                 "timestamp": e.timestamp.isoformat() + "Z" if e.timestamp else None,
@@ -203,3 +220,79 @@ async def generate_security_report(
             "overrides": len(overrides),
         },
     }
+
+
+# ─── Trust Score Computation ──────────────────────────────────────────
+
+def _compute_trust_score(login_events, guard_events, tx_events) -> dict:
+    """
+    Compute a unified Trust Score (0-100) from all risk engines.
+    Higher = more trusted. Continuously updated.
+    """
+    # Start at 100, deduct for risky behavior
+    score = 100.0
+
+    # Login penalties (weight: 40%)
+    if login_events:
+        high_logins = sum(1 for e in login_events if e.risk_level == "high")
+        medium_logins = sum(1 for e in login_events if e.risk_level == "medium")
+        login_penalty = min(40, high_logins * 8 + medium_logins * 3)
+        score -= login_penalty
+
+    # Guard penalties (weight: 30%)
+    if guard_events:
+        threats = sum(1 for e in guard_events if e.risk_detected)
+        overrides = sum(1 for e in guard_events if e.user_override)
+        guard_penalty = min(30, threats * 5 + overrides * 2)
+        score -= guard_penalty
+
+    # Transaction penalties (weight: 30%)
+    if tx_events:
+        blocked = sum(1 for e in tx_events if e.status == "blocked")
+        cooldowns = sum(1 for e in tx_events if e.cooldown_until is not None)
+        tx_penalty = min(30, blocked * 10 + cooldowns * 5)
+        score -= tx_penalty
+
+    score = max(0, round(score))
+
+    if score >= 80:
+        level = "trusted"
+    elif score >= 50:
+        level = "monitoring"
+    else:
+        level = "high_risk"
+
+    return {
+        "score": score,
+        "level": level,
+    }
+
+
+@router.get("/trust-score")
+async def get_trust_score(
+    wallet_address: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the dynamic Trust Score for a wallet."""
+    w = wallet_address.lower()
+
+    login_result = await db.execute(
+        select(LoginEvent).where(LoginEvent.wallet_address == w)
+        .order_by(desc(LoginEvent.timestamp)).limit(100)
+    )
+    login_events = login_result.scalars().all()
+
+    guard_result = await db.execute(
+        select(GuardEvent).where(GuardEvent.wallet_address == w)
+        .order_by(desc(GuardEvent.timestamp)).limit(100)
+    )
+    guard_events = guard_result.scalars().all()
+
+    tx_result = await db.execute(
+        select(TransactionEvent).where(
+            (TransactionEvent.sender_wallet == w) | (TransactionEvent.recipient_wallet == w)
+        ).order_by(desc(TransactionEvent.created_at)).limit(100)
+    )
+    tx_events = tx_result.scalars().all()
+
+    return _compute_trust_score(login_events, guard_events, tx_events)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store';
 import { simulationAPI } from '../api';
-import { HiBolt, HiPlay, HiShieldExclamation, HiUser, HiDocumentText, HiCheck, HiFire } from 'react-icons/hi2';
+import { HiBolt, HiPlay, HiShieldExclamation, HiUser, HiDocumentText, HiCheck, HiFire, HiCurrencyDollar, HiBanknotes } from 'react-icons/hi2';
 
 export default function SimulationPage() {
   const { wallet, addNotification } = useStore();
@@ -43,6 +43,8 @@ export default function SimulationPage() {
     data_leak: HiDocumentText,
     clean_text: HiCheck,
     burst_attack: HiFire,
+    risky_transaction: HiCurrencyDollar,
+    safe_transaction: HiBanknotes,
     full_demo: HiBolt,
   };
 
@@ -52,6 +54,8 @@ export default function SimulationPage() {
     data_leak: 'from-yellow-600 to-amber-600',
     clean_text: 'from-green-600 to-emerald-600',
     burst_attack: 'from-red-600 to-pink-600',
+    risky_transaction: 'from-orange-600 to-red-600',
+    safe_transaction: 'from-teal-600 to-cyan-600',
     full_demo: 'from-purple-600 to-blue-600',
   };
 
@@ -133,13 +137,17 @@ export default function SimulationPage() {
                        event.type === 'normal_login' ? '🟢 Normal Login' :
                        event.type === 'data_leak' ? '🟡 Data Leak' :
                        event.type === 'burst_attack' ? '⚡ Burst Attack' :
-                       event.type === 'clean_text' ? '✅ Clean Text' : event.type}
+                       event.type === 'clean_text' ? '✅ Clean Text' :
+                       event.type === 'risky_transaction' ? '🔴 Risky Transaction' :
+                       event.type === 'safe_transaction' ? '🟢 Safe Transaction' : event.type}
                       {event.phase && <span className="text-xs text-gray-500 ml-2">({event.phase})</span>}
                     </p>
                     <p className="text-xs text-gray-500">
                       {event.country && `${event.city || ''}, ${event.country}`}
                       {event.text_preview && `"${event.text_preview}"`}
                       {event.attempt && `Attempt #${event.attempt}`}
+                      {event.amount_eth && `${event.amount_eth} ETH → ${event.recipient || ''}`}
+                      {event.status && event.type?.includes('transaction') && ` [${event.status}]`}
                     </p>
                   </div>
                 </div>

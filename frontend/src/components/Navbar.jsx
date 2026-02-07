@@ -4,7 +4,7 @@ import useStore from '../store';
 import { HiShieldCheck, HiChartBar, HiChatBubbleLeftRight, HiLink, HiBeaker, HiArrowRightOnRectangle } from 'react-icons/hi2';
 
 export default function Navbar() {
-  const { isAuthenticated, wallet, riskLevel, logout } = useStore();
+  const { isAuthenticated, wallet, riskLevel, dashboardData, logout } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -66,7 +66,25 @@ export default function Navbar() {
           <div className="flex items-center gap-3">
             {isAuthenticated && wallet && (
               <>
-                {riskLevel && (
+                {dashboardData?.trust_score && (
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
+                    dashboardData.trust_score.level === 'trusted' ? 'bg-emerald-500/10 border-emerald-500/30' :
+                    dashboardData.trust_score.level === 'monitoring' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                    'bg-red-500/10 border-red-500/30'
+                  }`}>
+                    <HiShieldCheck className={`w-3.5 h-3.5 ${
+                      dashboardData.trust_score.level === 'trusted' ? 'text-emerald-400' :
+                      dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+                    }`} />
+                    <span className={`text-xs font-bold ${
+                      dashboardData.trust_score.level === 'trusted' ? 'text-emerald-400' :
+                      dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+                    }`}>
+                      {dashboardData.trust_score.score}
+                    </span>
+                  </div>
+                )}
+                {riskLevel && !dashboardData?.trust_score && (
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                     riskLevel === 'low' ? 'risk-low' : riskLevel === 'medium' ? 'risk-medium' : 'risk-high'
                   }`}>

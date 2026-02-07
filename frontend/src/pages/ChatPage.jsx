@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../store';
-import { chatAPI } from '../api';
+import { chatAPI, transactionAPI } from '../api';
 import {
   HiPaperAirplane,
   HiShieldCheck,
@@ -10,6 +10,8 @@ import {
   HiXMark,
   HiCheck,
   HiClock,
+  HiCurrencyDollar,
+  HiLockClosed,
 } from 'react-icons/hi2';
 
 export default function ChatPage() {
@@ -23,6 +25,10 @@ export default function ChatPage() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [warning, setWarning] = useState(null);
   const [wsStatus, setWsStatus] = useState('disconnected');
+  const [showSendEth, setShowSendEth] = useState(false);
+  const [ethAmount, setEthAmount] = useState('');
+  const [txRisk, setTxRisk] = useState(null);
+  const [txLoading, setTxLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
   const selectedConvRef = useRef(null);
@@ -297,6 +303,87 @@ export default function ChatPage() {
     setShowNewChat(false);
   };
 
+  // ─── Transaction Functions ──────────────────────────────────────
+  const handleEvaluateTransaction = async () => {
+    const amount = parseFloat(ethAmount);
+    if (isNaN(amount) || amount <= 0) {
+      addNotification({ type: 'error', title: 'Invalid Amount', message: 'Enter a valid ETH amount.' });
+      return;
+    }
+    const peer = getConvPeer(selectedConv);
+    if (!peer) return;
+
+    setTxLoading(true);
+    try {
+      // Gather recent chat context for urgency detection
+      const recentMessages = messages.slice(-10).map((m) => m.content).join(' ');
+      const res = await transactionAPI.evaluate({
+        sender_wallet: wallet,
+        recipient_wallet: peer,
+        amount_eth: amount,
+        conversation_id: selectedConv,
+        chat_context: recentMessages,
+      });
+      setTxRisk(res.data);
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Evaluation Failed', message: 'Could not evaluate transaction risk.' });
+    }
+    setTxLoading(false);
+  };
+
+  const handleSendEth = async () => {
+    if (!txRisk || !window.ethereum) {
+      addNotification({ type: 'error', title: 'MetaMask Required', message: 'Install MetaMask to send ETH.' });
+      return;
+    }
+    const peer = getConvPeer(selectedConv);
+    setTxLoading(true);
+    try {
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+      // Step-up: require personal_sign for medium-risk transactions
+      if (txRisk.step_up_required) {
+        const stepUpMsg = `SentinelX Step-Up Verification\n\nConfirm transfer of ${ethAmount} ETH to ${peer}\nTransaction ID: ${txRisk.transaction_id}\nRisk: ${txRisk.risk_level.toUpperCase()}\nTime: ${new Date().toISOString()}`;
+        await window.ethereum.request({
+          method: 'personal_sign',
+          params: [stepUpMsg, accounts[0]],
+        });
+        addNotification({ type: 'success', title: 'Step-Up Verified', message: 'Identity confirmed via wallet signature.' });
+      }
+
+      const amountHex = '0x' + Math.floor(parseFloat(ethAmount) * 1e18).toString(16);
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: accounts[0], to: peer, value: amountHex }],
+      });
+      // Confirm on backend
+      await transactionAPI.confirm({
+        transaction_id: txRisk.transaction_id,
+        tx_hash: txHash,
+        step_up_completed: txRisk.step_up_required,
+      });
+      addNotification({ type: 'success', title: 'Transfer Sent', message: `${ethAmount} ETH sent to ${peer.slice(0, 8)}...` });
+      // Send a chat message about the transfer
+      wsSend({
+        type: 'send_message',
+        conversation_id: selectedConv,
+        content: `Sent ${ethAmount} ETH (tx: ${txHash.slice(0, 14)}...)`,
+      });
+      setShowSendEth(false);
+      setEthAmount('');
+      setTxRisk(null);
+    } catch (err) {
+      addNotification({ type: 'error', title: 'Transfer Failed', message: err.message || 'Transaction was rejected.' });
+    }
+    setTxLoading(false);
+  };
+
+  const closeSendEth = () => {
+    setShowSendEth(false);
+    setEthAmount('');
+    setTxRisk(null);
+  };
+
   const formatAddr = (addr) =>
     addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '';
   const formatTime = (ts) =>
@@ -492,11 +579,128 @@ export default function ChatPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-emerald-400">
-                  <HiShieldCheck className="w-4 h-4" />
-                  DLP Active
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowSendEth(!showSendEth)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 text-xs font-medium transition-all"
+                  >
+                    <HiCurrencyDollar className="w-4 h-4" />
+                    Send ETH
+                  </button>
+                  <div className="flex items-center gap-1 text-xs text-emerald-400">
+                    <HiShieldCheck className="w-4 h-4" />
+                    DLP Active
+                  </div>
                 </div>
               </div>
+
+              {/* Send ETH Panel */}
+              {showSendEth && (
+                <div className="mb-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <HiCurrencyDollar className="w-5 h-5 text-emerald-400" />
+                      <span className="font-semibold text-emerald-400 text-sm">Send ETH to {formatAddr(getConvPeer(selectedConv))}</span>
+                    </div>
+                    <button onClick={closeSendEth} className="text-gray-500 hover:text-white">
+                      <HiXMark className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {!txRisk ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={ethAmount}
+                        onChange={(e) => setEthAmount(e.target.value)}
+                        placeholder="0.00 ETH"
+                        className="flex-1 bg-sentinel-dark border border-sentinel-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-emerald-500/50 focus:outline-none font-mono"
+                      />
+                      <button
+                        onClick={handleEvaluateTransaction}
+                        disabled={txLoading || !ethAmount}
+                        className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-all disabled:opacity-50"
+                      >
+                        {txLoading ? (
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          'Evaluate Risk'
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Risk Score Display */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-gray-400">Transaction Risk Score</p>
+                          <p className={`text-2xl font-bold ${
+                            txRisk.risk_level === 'low' ? 'text-emerald-400' :
+                            txRisk.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
+                          }`}>
+                            {txRisk.display_score}/100
+                          </p>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          txRisk.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                          txRisk.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                          'bg-red-500/20 text-red-400 border border-red-500/30'
+                        }`}>
+                          {txRisk.risk_level.toUpperCase()}
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-gray-400">{txRisk.action}</p>
+
+                      {/* Risk Factors */}
+                      {txRisk.factors?.length > 0 && (
+                        <div className="space-y-1">
+                          {txRisk.factors.filter(f => f.triggered).map((f, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs text-gray-400">
+                              <HiExclamationTriangle className="w-3 h-3 text-yellow-400 flex-shrink-0" />
+                              {f.label}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        {txRisk.blocked ? (
+                          <div className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                            <HiLockClosed className="w-4 h-4" />
+                            Blocked — Cooldown {txRisk.cooldown_minutes}min
+                          </div>
+                        ) : txRisk.step_up_required ? (
+                          <button
+                            onClick={handleSendEth}
+                            disabled={txLoading}
+                            className="flex-1 px-3 py-2 rounded-lg bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/30 text-sm font-medium transition-all disabled:opacity-50"
+                          >
+                            {txLoading ? 'Processing...' : `Confirm & Send ${ethAmount} ETH (Step-Up)`}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleSendEth}
+                            disabled={txLoading}
+                            className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 text-sm font-medium transition-all disabled:opacity-50"
+                          >
+                            {txLoading ? 'Processing...' : `Send ${ethAmount} ETH`}
+                          </button>
+                        )}
+                        <button
+                          onClick={closeSendEth}
+                          className="px-3 py-2 rounded-lg bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 text-sm font-medium transition-all"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1">

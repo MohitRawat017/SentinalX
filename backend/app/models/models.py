@@ -125,3 +125,24 @@ class Message(Base):
     risk_categories = Column(JSON, nullable=True)
     redacted = Column(Boolean, default=False)
     user_override = Column(Boolean, default=False)
+
+
+class TransactionEvent(Base):
+    __tablename__ = "transaction_events"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    sender_wallet = Column(String, nullable=False, index=True)
+    recipient_wallet = Column(String, nullable=False, index=True)
+    amount_eth = Column(Float, nullable=False)
+    risk_score = Column(Float, default=0.0)
+    risk_level = Column(String, default="low")
+    risk_factors = Column(JSON, nullable=True)
+    status = Column(String, default="pending")  # pending, approved, blocked, completed, cooldown
+    tx_hash = Column(String, nullable=True)
+    conversation_id = Column(String, nullable=True, index=True)
+    step_up_required = Column(Boolean, default=False)
+    step_up_completed = Column(Boolean, default=False)
+    cooldown_until = Column(DateTime, nullable=True)
+    event_hash = Column(String, nullable=True)
+    merkle_root = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
