@@ -40,9 +40,6 @@ export default function ModalNavbar({
 
                     {/* CTA Button */}
                     <div className="flex items-center gap-4">
-                        <a href="/login" className="text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">
-                            Log in
-                        </a>
                         <button
                             onClick={onCtaClick}
                             className="px-5 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-gray-100 transition-all"

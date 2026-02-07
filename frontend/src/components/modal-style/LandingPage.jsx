@@ -18,7 +18,7 @@ export default function LandingPage() {
     // Navigation items (simplified)
     const navItems = [
         { label: 'Features', href: '#features' },
-        { label: 'Docs', href: 'https://github.com' },
+        { label: 'Docs', href: 'https://github.com/MohitRawat017/SentinalX' },
     ];
 
     // Features for the feature cards section
@@ -72,7 +72,7 @@ export default function LandingPage() {
             links: [
                 { label: 'About', href: '#' },
                 { label: 'Contact', href: '#' },
-                { label: 'GitHub', href: 'https://github.com' },
+                { label: 'GitHub', href: 'https://github.com/MohitRawat017/SentinalX' },
             ],
         },
     ];
@@ -143,7 +143,7 @@ export default function LandingPage() {
                         </button>
 
                         <a
-                            href="https://github.com"
+                            href="https://github.com/MohitRawat017/SentinalX"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="px-8 py-4 rounded-full border border-white/20 text-white font-medium hover:bg-white/5 transition-all backdrop-blur-sm"
