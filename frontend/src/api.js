@@ -24,6 +24,7 @@ export const authAPI = {
   verify: (data) => api.post('/auth/verify', data),
   getSession: () => api.get('/auth/session'),
   challenge: (data) => api.post('/auth/challenge', data),
+  stepUpVerify: (data) => api.post('/auth/step-up-verify', data),
   logout: () => api.post('/auth/logout'),
   securityState: (wallet) => api.get('/auth/security-state', { params: { wallet_address: wallet } }),
   refreshSecurityState: (wallet) => api.post('/auth/security-state/refresh', null, { params: { wallet_address: wallet } }),

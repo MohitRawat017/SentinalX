@@ -72,21 +72,21 @@ export default function Dashboard() {
         <div className="flex gap-2">
           <button
             onClick={seedDemoData}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-all text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-teal-500/20 text-teal-400 border border-teal-500/30 hover:bg-teal-500/30 transition-all text-sm font-medium"
           >
             <HiBolt className="w-4 h-4" />
             Seed Demo Data
           </button>
           <button
             onClick={fetchReport}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30 transition-all text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-all text-sm font-medium"
           >
             📊 Security Report
           </button>
           <button
             onClick={fetchDashboard}
             disabled={isLoading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-all text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-all text-sm font-medium"
           >
             <HiArrowPath className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -97,41 +97,36 @@ export default function Dashboard() {
       {/* Trust Score + Stats Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Trust Score Card */}
-        <div className={`glass-card p-6 border flex flex-col items-center justify-center ${
-          data?.trust_score?.level === 'trusted' ? 'border-emerald-500/30' :
-          data?.trust_score?.level === 'monitoring' ? 'border-yellow-500/30' :
-          data?.trust_score?.level === 'high_risk' ? 'border-red-500/30' : 'border-sentinel-border'
-        }`}>
+        <div className={`bg-white/[0.03] backdrop-blur-sm rounded-2xl p-6 border flex flex-col items-center justify-center ${data?.trust_score?.level === 'trusted' ? 'border-emerald-500/30' :
+            data?.trust_score?.level === 'monitoring' ? 'border-yellow-500/30' :
+              data?.trust_score?.level === 'high_risk' ? 'border-red-500/30' : 'border-white/10'
+          }`}>
           <div className="flex items-center gap-2 mb-2">
-            <HiShieldCheck className={`w-6 h-6 ${
-              data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
-              data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
-            }`} />
+            <HiShieldCheck className={`w-6 h-6 ${data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
+                data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+              }`} />
             <span className="text-sm font-semibold text-gray-300">Trust Score</span>
           </div>
-          <p className={`text-4xl font-bold ${
-            data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
-            data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
-          }`}>
+          <p className={`text-4xl font-bold ${data?.trust_score?.level === 'trusted' ? 'text-emerald-400' :
+              data?.trust_score?.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+            }`}>
             {data?.trust_score?.score ?? '--'}
           </p>
-          <span className={`text-xs font-medium mt-1 px-2 py-0.5 rounded-full ${
-            data?.trust_score?.level === 'trusted' ? 'bg-emerald-500/20 text-emerald-400' :
-            data?.trust_score?.level === 'monitoring' ? 'bg-yellow-500/20 text-yellow-400' :
-            data?.trust_score?.level === 'high_risk' ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'
-          }`}>
+          <span className={`text-xs font-medium mt-1 px-2 py-0.5 rounded-full ${data?.trust_score?.level === 'trusted' ? 'bg-emerald-500/20 text-emerald-400' :
+              data?.trust_score?.level === 'monitoring' ? 'bg-yellow-500/20 text-yellow-400' :
+                data?.trust_score?.level === 'high_risk' ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'
+            }`}>
             {data?.trust_score?.level === 'trusted' ? 'TRUSTED' :
-             data?.trust_score?.level === 'monitoring' ? 'MONITORING' :
-             data?.trust_score?.level === 'high_risk' ? 'HIGH RISK' : 'N/A'}
+              data?.trust_score?.level === 'monitoring' ? 'MONITORING' :
+                data?.trust_score?.level === 'high_risk' ? 'HIGH RISK' : 'N/A'}
           </span>
 
           {/* Enforcement Status Badge */}
           {data?.enforcement && data.enforcement.security_status !== 'active' && (
-            <div className={`mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${
-              data.enforcement.security_status === 'locked' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-              data.enforcement.security_status === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-              'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-            }`}>
+            <div className={`mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${data.enforcement.security_status === 'locked' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                data.enforcement.security_status === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                  'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+              }`}>
               {data.enforcement.security_status === 'locked' ? (
                 <><HiLockClosed className="w-3 h-3" /> LOCKED</>
               ) : data.enforcement.security_status === 'restricted' ? (

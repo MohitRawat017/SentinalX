@@ -113,6 +113,59 @@ class SecurityEnforcement:
             "cooldown_reason": cooldown_reason,
         }
 
+    # ── Step-up completion: boost trust score ─────────────────────────
+    async def complete_step_up(
+        self,
+        db: AsyncSession,
+        wallet_address: str,
+        boost: int = 20,
+    ) -> dict:
+        """
+        Called after successful step-up verification (wallet re-sign).
+        Boosts trust score and may transition status back to 'active'.
+        """
+        w = wallet_address.lower()
+        now = datetime.utcnow()
+
+        result = await db.execute(
+            select(SecurityState).where(SecurityState.wallet_address == w)
+        )
+        state = result.scalar_one_or_none()
+
+        if state is None:
+            # No existing state → already trusted
+            return {
+                "trust_score": 100,
+                "security_status": "active",
+                "locked_until": None,
+                "cooldown_reason": None,
+                "boosted": False,
+            }
+
+        old_score = state.trust_score
+        new_score = min(100, state.trust_score + boost)
+        state.trust_score = new_score
+
+        # Re-determine status from boosted score
+        if new_score >= TRUST_ACTIVE_THRESHOLD:
+            state.security_status = "active"
+            state.cooldown_reason = None
+        elif new_score >= TRUST_STEP_UP_THRESHOLD:
+            state.security_status = "step_up_required"
+
+        state.last_evaluated = now
+        state.updated_at = now
+        await db.commit()
+
+        return {
+            "trust_score": new_score,
+            "security_status": state.security_status,
+            "locked_until": state.locked_until.isoformat() + "Z" if state.locked_until else None,
+            "cooldown_reason": state.cooldown_reason,
+            "boosted": True,
+            "previous_score": old_score,
+        }
+
     # ── Quick check without recomputation ─────────────────────────────
     async def get_security_state(
         self, db: AsyncSession, wallet_address: str,

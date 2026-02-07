@@ -11,10 +11,10 @@ export default function LoginMap({ points }) {
   };
 
   return (
-    <div className="glass-card p-6">
+    <div className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-6">
       <h3 className="text-lg font-semibold text-white mb-4">🌍 Login Origins</h3>
       {points.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-gray-500 rounded-xl bg-sentinel-dark">
+        <div className="h-64 flex items-center justify-center text-gray-500 rounded-xl bg-white/[0.02]">
           No geo-located logins yet. Run a simulation to see the map.
         </div>
       ) : (

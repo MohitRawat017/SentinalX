@@ -10,7 +10,7 @@ export default function SimulationPage() {
   const [results, setResults] = useState(null);
 
   useEffect(() => {
-    simulationAPI.scenarios().then(res => setScenarios(res.data.scenarios)).catch(() => {});
+    simulationAPI.scenarios().then(res => setScenarios(res.data.scenarios)).catch(() => { });
   }, []);
 
   const runScenario = async (scenarioId) => {
@@ -79,7 +79,7 @@ export default function SimulationPage() {
           const gradient = scenarioColors[scenario.id] || 'from-blue-600 to-purple-600';
 
           return (
-            <div key={scenario.id} className="glass-card p-6 hover:border-blue-500/30 transition-all group">
+            <div key={scenario.id} className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-6 hover:border-emerald-500/30 transition-all group">
               <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-4 group-hover:shadow-lg transition-all`}>
                 <Icon className="w-6 h-6 text-white" />
               </div>
@@ -106,9 +106,9 @@ export default function SimulationPage() {
 
       {/* Results */}
       {results && (
-        <div className="glass-card p-6">
+        <div className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-6">
           <h3 className="text-lg font-semibold text-white mb-4">
-            📊 Simulation Results — <span className="text-blue-400">{results.scenario}</span>
+            📊 Simulation Results — <span className="text-emerald-400">{results.scenario}</span>
           </h3>
 
           {/* Enforcement State after simulation */}
@@ -123,8 +123,8 @@ export default function SimulationPage() {
               <div className={`mb-4 p-4 rounded-lg border ${bgClass}`}>
                 <div className="flex items-center gap-2 mb-1">
                   {isActive ? <HiShieldCheck className={`w-5 h-5 ${textClass}`} /> :
-                   isStepUp ? <HiExclamationTriangle className={`w-5 h-5 ${textClass}`} /> :
-                   <HiLockClosed className={`w-5 h-5 ${textClass}`} />}
+                    isStepUp ? <HiExclamationTriangle className={`w-5 h-5 ${textClass}`} /> :
+                      <HiLockClosed className={`w-5 h-5 ${textClass}`} />}
                   <span className={`text-sm font-bold ${textClass}`}>
                     Enforcement: {enf.security_status.replace('_', ' ').toUpperCase()}
                   </span>
@@ -156,22 +156,21 @@ export default function SimulationPage() {
             {(Array.isArray(results.results) ? results.results : results.results?.phases || []).map((event, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between p-3 rounded-lg bg-sentinel-dark/50 border border-sentinel-border"
+                className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/5"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-2.5 h-2.5 rounded-full ${
-                    event.risk_level === 'high' || event.is_risky ? 'bg-red-500' :
-                    event.risk_level === 'medium' ? 'bg-yellow-500' : 'bg-emerald-500'
-                  }`} />
+                  <div className={`w-2.5 h-2.5 rounded-full ${event.risk_level === 'high' || event.is_risky ? 'bg-red-500' :
+                      event.risk_level === 'medium' ? 'bg-yellow-500' : 'bg-emerald-500'
+                    }`} />
                   <div>
                     <p className="text-sm text-white">
                       {event.type === 'suspicious_login' ? '🔴 Suspicious Login' :
-                       event.type === 'normal_login' ? '🟢 Normal Login' :
-                       event.type === 'data_leak' ? '🟡 Data Leak' :
-                       event.type === 'burst_attack' ? '⚡ Burst Attack' :
-                       event.type === 'clean_text' ? '✅ Clean Text' :
-                       event.type === 'risky_transaction' ? '🔴 Risky Transaction' :
-                       event.type === 'safe_transaction' ? '🟢 Safe Transaction' : event.type}
+                        event.type === 'normal_login' ? '🟢 Normal Login' :
+                          event.type === 'data_leak' ? '🟡 Data Leak' :
+                            event.type === 'burst_attack' ? '⚡ Burst Attack' :
+                              event.type === 'clean_text' ? '✅ Clean Text' :
+                                event.type === 'risky_transaction' ? '🔴 Risky Transaction' :
+                                  event.type === 'safe_transaction' ? '🟢 Safe Transaction' : event.type}
                       {event.phase && <span className="text-xs text-gray-500 ml-2">({event.phase})</span>}
                     </p>
                     <p className="text-xs text-gray-500">
@@ -185,19 +184,17 @@ export default function SimulationPage() {
                 </div>
                 <div className="text-right">
                   {event.risk_score !== undefined && (
-                    <span className={`text-sm font-mono font-bold ${
-                      event.risk_level === 'high' ? 'text-red-400' :
-                      event.risk_level === 'medium' ? 'text-yellow-400' : 'text-emerald-400'
-                    }`}>
+                    <span className={`text-sm font-mono font-bold ${event.risk_level === 'high' ? 'text-red-400' :
+                        event.risk_level === 'medium' ? 'text-yellow-400' : 'text-emerald-400'
+                      }`}>
                       {event.risk_score?.toFixed(3)}
                     </span>
                   )}
                   {event.severity && (
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      event.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                      event.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
-                      'bg-yellow-500/20 text-yellow-400'
-                    }`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${event.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                        event.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                      }`}>
                       {event.severity}
                     </span>
                   )}

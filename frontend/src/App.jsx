@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import ChatPage from './pages/ChatPage';
 import AuditPage from './pages/AuditPage';
 import SimulationPage from './pages/SimulationPage';
+import LandingPage from './components/modal-style/LandingPage';
 import { HiShieldExclamation, HiLockClosed, HiExclamationTriangle } from 'react-icons/hi2';
 
 function EnforcementBanner() {
@@ -59,7 +60,7 @@ function App() {
       <>
         <Notifications />
         <Routes>
-          <Route path="/" element={<LoginPage />} />
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
@@ -69,7 +70,7 @@ function App() {
 
   // Authenticated layout with navbar
   return (
-    <div className="min-h-screen animated-gradient">
+    <div className="min-h-screen bg-[#0a0a0f]">
       <Navbar />
       <EnforcementBanner />
       <Notifications />

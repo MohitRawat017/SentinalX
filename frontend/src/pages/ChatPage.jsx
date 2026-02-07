@@ -389,9 +389,9 @@ export default function ChatPage() {
   const formatTime = (ts) =>
     ts
       ? new Date(ts).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
+        hour: '2-digit',
+        minute: '2-digit',
+      })
       : '';
 
   const formatTimeLeft = (expiresAt) => {
@@ -439,7 +439,7 @@ export default function ChatPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <HiChatBubbleLeftRight className="w-7 h-7 text-blue-400" />
+            <HiChatBubbleLeftRight className="w-7 h-7 text-emerald-400" />
             Secure Chat
           </h1>
           <p className="text-gray-400 text-sm mt-1">
@@ -448,11 +448,10 @@ export default function ChatPage() {
         </div>
         <div className="flex items-center gap-1.5">
           <div
-            className={`w-2 h-2 rounded-full ${
-              wsStatus === 'connected'
+            className={`w-2 h-2 rounded-full ${wsStatus === 'connected'
                 ? 'bg-emerald-500 pulse-dot'
                 : 'bg-gray-600'
-            }`}
+              }`}
           />
           <span className="text-xs text-gray-500">
             {wsStatus === 'connected' ? 'Live' : 'Reconnecting...'}
@@ -465,14 +464,14 @@ export default function ChatPage() {
         style={{ height: 'calc(100vh - 14rem)' }}
       >
         {/* Conversations Panel */}
-        <div className="glass-card p-4 lg:col-span-1 flex flex-col">
+        <div className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-4 lg:col-span-1 flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-300">
               Conversations
             </h3>
             <button
               onClick={() => setShowNewChat(!showNewChat)}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-all"
+              className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-emerald-400 transition-all"
               title="New Chat"
             >
               <HiUserPlus className="w-4 h-4" />
@@ -485,12 +484,12 @@ export default function ChatPage() {
                 value={newPeer}
                 onChange={(e) => setNewPeer(e.target.value)}
                 placeholder="0x... wallet address"
-                className="w-full bg-sentinel-dark border border-sentinel-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-blue-500/50 focus:outline-none font-mono"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-emerald-500/50 focus:outline-none font-mono"
                 onKeyDown={(e) => e.key === 'Enter' && handleStartChat()}
               />
               <button
                 onClick={handleStartChat}
-                className="w-full px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all"
+                className="w-full px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-all"
               >
                 Start Chat
               </button>
@@ -512,18 +511,17 @@ export default function ChatPage() {
                     setSelectedConv(c.conversation_id);
                     setWarning(null);
                   }}
-                  className={`w-full text-left p-3 rounded-lg transition-all ${
-                    selectedConv === c.conversation_id
-                      ? 'bg-blue-500/20 border border-blue-500/30'
+                  className={`w-full text-left p-3 rounded-lg transition-all ${selectedConv === c.conversation_id
+                      ? 'bg-emerald-500/20 border border-emerald-500/30'
                       : 'hover:bg-white/5 border border-transparent'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-mono text-white">
                       {formatAddr(c.peer)}
                     </p>
                     {c.unread_count > 0 && (
-                      <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-blue-500 text-white text-xs font-bold px-1.5">
+                      <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-emerald-500 text-white text-xs font-bold px-1.5">
                         {c.unread_count}
                       </span>
                     )}
@@ -550,7 +548,7 @@ export default function ChatPage() {
         </div>
 
         {/* Chat Panel */}
-        <div className="glass-card p-4 lg:col-span-3 flex flex-col">
+        <div className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-4 lg:col-span-3 flex flex-col">
           {!selectedConv ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
@@ -563,9 +561,9 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-sentinel-border mb-3">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white text-xs font-bold">
                     {getConvPeer(selectedConv)
                       .slice(2, 4)
                       .toUpperCase()}
@@ -636,18 +634,16 @@ export default function ChatPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-xs text-gray-400">Transaction Risk Score</p>
-                          <p className={`text-2xl font-bold ${
-                            txRisk.risk_level === 'low' ? 'text-emerald-400' :
-                            txRisk.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
-                          }`}>
+                          <p className={`text-2xl font-bold ${txRisk.risk_level === 'low' ? 'text-emerald-400' :
+                              txRisk.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
+                            }`}>
                             {txRisk.display_score}/100
                           </p>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                          txRisk.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                          txRisk.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                          'bg-red-500/20 text-red-400 border border-red-500/30'
-                        }`}>
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${txRisk.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                            txRisk.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                              'bg-red-500/20 text-red-400 border border-red-500/30'
+                          }`}>
                           {txRisk.risk_level.toUpperCase()}
                         </div>
                       </div>
@@ -716,24 +712,21 @@ export default function ChatPage() {
                     return (
                       <div
                         key={m.id}
-                        className={`flex ${
-                          isMine ? 'justify-end' : 'justify-start'
-                        }`}
+                        className={`flex ${isMine ? 'justify-end' : 'justify-start'
+                          }`}
                       >
                         <div
-                          className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${
-                            isMine
+                          className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${isMine
                               ? 'bg-blue-600 text-white rounded-br-md'
                               : 'bg-sentinel-dark border border-sentinel-border text-gray-200 rounded-bl-md'
-                          }`}
+                            }`}
                         >
                           <p className="text-sm whitespace-pre-wrap break-words">
                             {m.content}
                           </p>
                           <div
-                            className={`flex items-center gap-2 mt-1 ${
-                              isMine ? 'justify-end' : 'justify-start'
-                            }`}
+                            className={`flex items-center gap-2 mt-1 ${isMine ? 'justify-end' : 'justify-start'
+                              }`}
                           >
                             {m.redacted && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300">
@@ -752,9 +745,8 @@ export default function ChatPage() {
                               </span>
                             )}
                             <span
-                              className={`text-xs ${
-                                isMine ? 'text-blue-200' : 'text-gray-500'
-                              }`}
+                              className={`text-xs ${isMine ? 'text-blue-200' : 'text-gray-500'
+                                }`}
                             >
                               {formatTime(m.timestamp)}
                             </span>

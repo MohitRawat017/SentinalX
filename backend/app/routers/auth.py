@@ -25,6 +25,7 @@ router = APIRouter()
 
 # ─── In-memory nonce store (for hackathon speed) ────────────────────
 nonce_store: dict = {}
+step_up_store: dict = {}  # nonce → { wallet, issued_at, expires_at }
 
 
 # ─── Request/Response Models ────────────────────────────────────────
@@ -249,11 +250,71 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
 async def step_up_challenge(req: ChallengeRequest):
     """Issue a step-up authentication challenge for high-risk logins"""
     nonce = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    expires_at = now + timedelta(minutes=2)
+
+    step_up_store[nonce] = {
+        "wallet": req.wallet_address.lower(),
+        "issued_at": now.isoformat(),
+        "expires_at": expires_at,
+    }
+
     return {
         "challenge_type": req.challenge_type,
         "nonce": nonce,
-        "message": f"SentinelX Step-Up Challenge\n\nSign this message to confirm your identity.\n\nNonce: {nonce}\nTimestamp: {datetime.utcnow().isoformat()}Z",
+        "message": f"SentinelX Step-Up Verification\n\nSign this message to confirm your identity and restore trust.\n\nWallet: {req.wallet_address}\nNonce: {nonce}\nTimestamp: {now.isoformat()}Z",
         "expires_in": 120,
+    }
+
+
+class StepUpVerifyRequest(BaseModel):
+    wallet_address: str
+    signature: str
+    nonce: str
+
+
+@router.post("/step-up-verify")
+async def step_up_verify(req: StepUpVerifyRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Verify a step-up challenge signature.
+    On success, boosts trust score toward the active zone.
+    """
+    wallet = req.wallet_address.strip().lower()
+    nonce = req.nonce
+
+    # Validate the challenge nonce exists and hasn't expired
+    challenge = step_up_store.get(nonce)
+    if not challenge:
+        raise HTTPException(status_code=400, detail="Invalid or expired challenge nonce")
+
+    if challenge["wallet"] != wallet:
+        raise HTTPException(status_code=400, detail="Wallet mismatch")
+
+    if datetime.utcnow() > challenge["expires_at"]:
+        step_up_store.pop(nonce, None)
+        raise HTTPException(status_code=400, detail="Challenge expired. Please request a new one.")
+
+    # Verify signature (same logic as login)
+    expected_message = f"SentinelX Step-Up Verification\n\nSign this message to confirm your identity and restore trust.\n\nWallet: {req.wallet_address}\nNonce: {nonce}\nTimestamp: {challenge['issued_at']}Z"
+    try:
+        is_valid = _verify_signature(expected_message, req.signature, wallet)
+    except Exception:
+        is_valid = len(req.signature) > 20 and req.signature.startswith("0x")
+
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Consume the nonce
+    step_up_store.pop(nonce, None)
+
+    # Boost trust score via enforcement service
+    enforcer = SecurityEnforcement.get_instance()
+    result = await enforcer.complete_step_up(db, wallet, boost=20)
+
+    return {
+        "success": True,
+        "message": "Step-up verification successful. Trust score boosted.",
+        "enforcement": result,
     }
 
 

@@ -2,14 +2,96 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../store';
 import { authAPI } from '../api';
-import { HiShieldCheck, HiBolt, HiCpuChip, HiLockClosed, HiCommandLine } from 'react-icons/hi2';
+import { HiShieldCheck, HiBolt, HiCpuChip, HiLockClosed, HiCommandLine, HiExclamationTriangle, HiFingerPrint } from 'react-icons/hi2';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [authResult, setAuthResult] = useState(null);
+  const [stepUpState, setStepUpState] = useState(null); // { wallet, challenge, hasMetaMask }
+  const [stepUpLoading, setStepUpLoading] = useState(false);
   const { setAuth, setEnforcement, addNotification } = useStore();
   const navigate = useNavigate();
+
+  const proceedAfterLogin = (data) => {
+    setAuth(data.wallet_address, data.token, data.risk_level, data.risk_score);
+    setEnforcement({
+      security_status: data.security_status,
+      trust_score: data.trust_score,
+      locked_until: data.locked_until,
+    });
+    setAuthResult(data);
+    addNotification({
+      type: data.risk_level === 'high' ? 'warning' : 'success',
+      title: 'Authenticated',
+      message: data.message,
+    });
+  };
+
+  const handleStepUp = async () => {
+    if (!stepUpState) return;
+    setStepUpLoading(true);
+    setError('');
+
+    try {
+      // 1. Request a step-up challenge from backend
+      const challengeRes = await authAPI.challenge({
+        wallet_address: stepUpState.wallet,
+        challenge_type: 're-sign',
+      });
+      const { nonce, message } = challengeRes.data;
+
+      let signature;
+      if (stepUpState.hasMetaMask) {
+        // 2. MetaMask re-sign
+        signature = await window.ethereum.request({
+          method: 'personal_sign',
+          params: [message, stepUpState.wallet],
+        });
+      } else {
+        // Demo mode: simulated signature
+        signature = '0x' + 'b'.repeat(130);
+      }
+
+      // 3. Verify with backend
+      const verifyRes = await authAPI.stepUpVerify({
+        wallet_address: stepUpState.wallet,
+        signature,
+        nonce,
+      });
+
+      if (verifyRes.data.success) {
+        // Update enforcement with boosted score
+        setEnforcement(verifyRes.data.enforcement);
+        addNotification({
+          type: 'success',
+          title: 'Verification Complete',
+          message: `Trust score boosted: ${verifyRes.data.enforcement.previous_score} → ${verifyRes.data.enforcement.trust_score}`,
+        });
+        setStepUpState(null);
+        navigate('/dashboard');
+      }
+    } catch (err) {
+      console.error('Step-up error:', err);
+      if (err.code === 4001) {
+        setError('Signature rejected. You can skip verification and continue with restricted access.');
+      } else {
+        setError(err.response?.data?.detail || 'Step-up verification failed. Try again or skip.');
+      }
+    }
+
+    setStepUpLoading(false);
+  };
+
+  const skipStepUp = () => {
+    setStepUpState(null);
+    addNotification({
+      type: 'warning',
+      title: 'Step-Up Skipped',
+      message: 'Some sensitive actions may require additional verification.',
+    });
+    navigate('/dashboard');
+  };
 
   const handleWalletLogin = async () => {
     setLoading(true);
@@ -38,26 +120,15 @@ export default function LoginPage() {
         });
 
         if (verifyRes.data.success) {
-          setAuth(
-            verifyRes.data.wallet_address,
-            verifyRes.data.token,
-            verifyRes.data.risk_level,
-            verifyRes.data.risk_score
-          );
-          setEnforcement({
-            security_status: verifyRes.data.security_status,
-            trust_score: verifyRes.data.trust_score,
-            locked_until: verifyRes.data.locked_until,
-          });
-          setAuthResult(verifyRes.data);
-          addNotification({
-            type: verifyRes.data.risk_level === 'high' ? 'warning' : 'success',
-            title: 'Authenticated',
-            message: verifyRes.data.message,
-          });
-          setTimeout(() => navigate('/dashboard'), 1500);
+          proceedAfterLogin(verifyRes.data);
+
+          if (verifyRes.data.step_up_required) {
+            // Intercept: show step-up challenge instead of navigating
+            setStepUpState({ wallet, hasMetaMask: true });
+          } else {
+            setTimeout(() => navigate('/dashboard'), 1500);
+          }
         } else {
-          // Enforcement lockout
           if (verifyRes.data.security_status === 'locked') {
             setError(`Account locked: ${verifyRes.data.message}`);
             setAuthResult(verifyRes.data);
@@ -101,24 +172,14 @@ export default function LoginPage() {
       });
 
       if (verifyRes.data.success) {
-        setAuth(
-          verifyRes.data.wallet_address,
-          verifyRes.data.token,
-          verifyRes.data.risk_level,
-          verifyRes.data.risk_score
-        );
-        setEnforcement({
-          security_status: verifyRes.data.security_status,
-          trust_score: verifyRes.data.trust_score,
-          locked_until: verifyRes.data.locked_until,
-        });
-        setAuthResult(verifyRes.data);
-        addNotification({
-          type: 'success',
-          title: 'Demo Login Successful',
-          message: `Risk Score: ${verifyRes.data.risk_score} (${verifyRes.data.risk_level})`,
-        });
-        setTimeout(() => navigate('/dashboard'), 1500);
+        proceedAfterLogin(verifyRes.data);
+
+        if (verifyRes.data.step_up_required) {
+          // Intercept: show step-up challenge
+          setStepUpState({ wallet: demoWallet, hasMetaMask: false });
+        } else {
+          setTimeout(() => navigate('/dashboard'), 1500);
+        }
       } else if (verifyRes.data.security_status === 'locked') {
         setError(`Account locked: ${verifyRes.data.message}`);
         setAuthResult(verifyRes.data);
@@ -137,6 +198,82 @@ export default function LoginPage() {
 
   return (
     <div className="landing-container">
+      {/* Step-Up Verification Overlay */}
+      {stepUpState && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="glass-card p-8 max-w-md w-full mx-4 border border-yellow-500/30">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center">
+                <HiExclamationTriangle className="w-6 h-6 text-yellow-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">Step-Up Verification Required</h2>
+                <p className="text-sm text-yellow-400">Elevated risk detected on your account</p>
+              </div>
+            </div>
+
+            {/* Explanation */}
+            <div className="mb-6 p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+              <p className="text-sm text-gray-300 leading-relaxed">
+                SentinelX has detected elevated risk on your account. To restore full access and boost your trust score,
+                please confirm your identity by signing a verification message with your wallet.
+              </p>
+            </div>
+
+            {/* Trust Score Info */}
+            {authResult?.trust_score != null && (
+              <div className="mb-6 flex items-center justify-between p-3 rounded-lg bg-sentinel-dark/50 border border-sentinel-border">
+                <span className="text-sm text-gray-400">Current Trust Score</span>
+                <span className={`text-lg font-bold font-mono ${
+                  authResult.trust_score >= 80 ? 'text-emerald-400' :
+                  authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
+                }`}>
+                  {authResult.trust_score}/100
+                </span>
+              </div>
+            )}
+
+            {/* Error */}
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
+                {error}
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="space-y-3">
+              <button
+                onClick={handleStepUp}
+                disabled={stepUpLoading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-50"
+              >
+                {stepUpLoading ? (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <HiFingerPrint className="w-5 h-5" />
+                    {stepUpState.hasMetaMask ? 'Verify with Wallet Signature' : 'Verify Identity (Demo)'}
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={skipStepUp}
+                disabled={stepUpLoading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-600/50 text-gray-400 hover:text-white hover:border-gray-500 text-sm transition-all disabled:opacity-50"
+              >
+                Skip for now (restricted access)
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 mt-4 text-center">
+              Completing verification will boost your trust score by +20 points
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Left Panel - Dark (Sign In) */}
       <div className="landing-left">
         {/* Logo */}
@@ -153,14 +290,14 @@ export default function LoginPage() {
           <p className="landing-subtitle">Get started with Web3 security protection</p>
 
           {/* Error Message */}
-          {error && (
+          {error && !stepUpState && (
             <div className="landing-error">
               {error}
             </div>
           )}
 
           {/* Auth Result */}
-          {authResult && (
+          {authResult && !stepUpState && (
             <div className={`landing-success ${authResult.security_status === 'locked' ? '!border-red-500/30 !bg-red-500/5' : ''}`}>
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full ${

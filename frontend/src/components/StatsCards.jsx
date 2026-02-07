@@ -6,7 +6,7 @@ export default function StatsCards({ stats }) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {[...Array(6)].map((_, i) => (
-          <div key={i} className="glass-card p-4 animate-pulse">
+          <div key={i} className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-4 animate-pulse">
             <div className="h-4 bg-gray-700 rounded w-2/3 mb-2" />
             <div className="h-8 bg-gray-700 rounded w-1/2" />
           </div>
@@ -77,7 +77,7 @@ export default function StatsCards({ stats }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
       {cards.map(({ label, value, icon: Icon, color, bg, border }) => (
-        <div key={label} className={`glass-card p-4 border ${border} hover:scale-105 transition-transform`}>
+        <div key={label} className={`bg-white/[0.03] backdrop-blur-sm rounded-2xl p-4 border ${border} hover:scale-105 transition-transform`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-gray-500 font-medium">{label}</span>
             <div className={`p-1.5 rounded-lg ${bg}`}>
