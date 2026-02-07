@@ -4,6 +4,7 @@ Behavioral financial firewall for in-chat ETH transfers.
 """
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
@@ -67,7 +68,7 @@ class TransactionRiskEngine:
 
         history = await self._get_history(db, sender)
 
-        # Compute factors (each 0.0 or 1.0)
+        # Compute graduated factors (each 0.0 to 1.0)
         amount_dev = self._check_amount_deviation(amount_eth, history)
         freq_anomaly = self._check_frequency_anomaly(history)
         first_recipient = self._check_first_recipient(recipient, history)
@@ -123,37 +124,73 @@ class TransactionRiskEngine:
     # ─── Factor Checks ────────────────────────────────────────────────
 
     def _check_amount_deviation(self, amount_eth: float, history: List[TransactionEvent]) -> float:
-        """1.0 if amount deviates >3x the historical average."""
+        """Graduated score based on how much amount deviates from historical average."""
         if not history:
-            # First transaction: moderate risk for any non-trivial amount
-            return 1.0 if amount_eth > 0.1 else 0.0
+            # First transaction: graduated by absolute amount
+            if amount_eth <= 0.01:
+                return 0.1
+            return min(1.0, 0.3 + 0.3 * math.log10(amount_eth / 0.01))
+
         avg = sum(e.amount_eth for e in history) / len(history)
-        if avg == 0:
-            return 1.0 if amount_eth > 0.1 else 0.0
-        return 1.0 if amount_eth > avg * 3 else 0.0
+        if avg <= 0:
+            if amount_eth <= 0.01:
+                return 0.1
+            return min(1.0, 0.3 + 0.3 * math.log10(amount_eth / 0.01))
+
+        ratio = amount_eth / avg
+        if ratio <= 1.5:
+            return 0.0  # within normal range
+        # Log scale: ratio 1.5 → 0.0, ratio 50 → 1.0
+        return min(1.0, math.log(ratio / 1.5) / math.log(50 / 1.5))
 
     def _check_frequency_anomaly(self, history: List[TransactionEvent]) -> float:
-        """1.0 if 3+ transactions in the last 30 minutes."""
+        """Graduated score based on transaction frequency in last 30 minutes."""
         if not history:
             return 0.0
         cutoff = datetime.utcnow() - timedelta(minutes=30)
         recent = sum(1 for e in history if e.created_at and e.created_at >= cutoff)
-        return 1.0 if recent >= 3 else 0.0
+        if recent <= 1:
+            return 0.0
+        elif recent == 2:
+            return 0.3
+        elif recent == 3:
+            return 0.6
+        elif recent == 4:
+            return 0.8
+        else:
+            return 1.0
 
     def _check_first_recipient(self, recipient: str, history: List[TransactionEvent]) -> float:
-        """1.0 if recipient has never been sent to before."""
+        """Score based on recipient familiarity and sender's diversity."""
         if not history:
             return 1.0
         known_recipients = {e.recipient_wallet for e in history}
-        return 0.0 if recipient in known_recipients else 1.0
+        if recipient in known_recipients:
+            return 0.0
+        # New recipient: less alarming if sender has diverse history
+        diversity = len(known_recipients)
+        if diversity >= 10:
+            return 0.4
+        elif diversity >= 5:
+            return 0.6
+        return 1.0
 
     def _check_urgency_language(self, chat_context: Optional[str]) -> float:
-        """1.0 if recent chat context contains urgency/manipulation phrases."""
+        """Graduated score based on number of urgency/manipulation phrases."""
         if not chat_context:
             return 0.0
         lower = chat_context.lower()
         matches = sum(1 for phrase in URGENCY_PHRASES if phrase in lower)
-        return 1.0 if matches >= 2 else (0.5 if matches == 1 else 0.0)
+        if matches == 0:
+            return 0.0
+        elif matches == 1:
+            return 0.3
+        elif matches == 2:
+            return 0.6
+        elif matches == 3:
+            return 0.8
+        else:
+            return 1.0
 
     async def _check_cooldown(self, db: AsyncSession, wallet: str) -> bool:
         """Check if wallet has an active cooldown."""

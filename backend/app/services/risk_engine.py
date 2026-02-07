@@ -67,7 +67,7 @@ class RiskEngine:
         # Fetch recent login history for this wallet
         history = await self._get_history(db, wallet)
 
-        # Compute binary factors (each 0.0 or 1.0)
+        # Compute graduated factors (each 0.0 to 1.0)
         new_device = self._check_new_device(user_agent, history)
         new_country = self._check_new_country(geo_country, history)
         rapid_attempts = self._check_rapid_attempts(history)
@@ -106,37 +106,68 @@ class RiskEngine:
     # ─── Factor checks ───────────────────────────────────────────────
 
     def _check_new_device(self, user_agent: str, history: List[LoginEvent]) -> float:
-        """1.0 if this user_agent has never been seen for the wallet."""
+        """Score based on device familiarity and device diversity."""
         if not user_agent or not history:
             return 1.0
         ua_hash = hashlib.md5(user_agent.encode()).hexdigest()
+        known_devices = set()
         for event in history:
             if event.user_agent:
-                prev_hash = hashlib.md5(event.user_agent.encode()).hexdigest()
-                if prev_hash == ua_hash:
-                    return 0.0
+                known_devices.add(hashlib.md5(event.user_agent.encode()).hexdigest())
+        if ua_hash in known_devices:
+            return 0.0
+        # New device: less alarming if user regularly uses multiple devices
+        if len(known_devices) >= 5:
+            return 0.4
+        elif len(known_devices) >= 3:
+            return 0.6
         return 1.0
 
     def _check_new_country(self, geo_country: Optional[str], history: List[LoginEvent]) -> float:
-        """1.0 if this country has never been seen for the wallet."""
+        """Score based on geographic familiarity."""
         if not geo_country:
             return 0.0
         if not history:
-            return 1.0
+            return 0.5  # first login, moderate
         known_countries = {e.geo_country for e in history if e.geo_country}
-        return 0.0 if geo_country in known_countries else 1.0
+        if geo_country in known_countries:
+            return 0.0
+        # New country: less suspicious if user travels frequently
+        if len(known_countries) >= 5:
+            return 0.5
+        return 1.0
 
     def _check_rapid_attempts(self, history: List[LoginEvent]) -> float:
-        """1.0 if 3+ logins within the last 10 minutes."""
+        """Graduated score based on login frequency in recent window."""
         if not history:
             return 0.0
         cutoff = datetime.utcnow() - timedelta(minutes=RAPID_WINDOW_MINUTES)
         recent_count = sum(1 for e in history if e.timestamp and e.timestamp >= cutoff)
-        return 1.0 if recent_count >= RAPID_COUNT_THRESHOLD else 0.0
+        if recent_count < 2:
+            return 0.0
+        elif recent_count == 2:
+            return 0.3
+        elif recent_count == 3:
+            return 0.6
+        elif recent_count == 4:
+            return 0.8
+        else:
+            return 1.0
 
     def _check_abnormal_time(self, current_hour: int) -> float:
-        """1.0 if current hour is outside normal hours (6am-10pm)."""
-        return 0.0 if NORMAL_HOUR_START <= current_hour <= NORMAL_HOUR_END else 1.0
+        """Graduated score based on how far outside normal hours."""
+        if NORMAL_HOUR_START <= current_hour <= NORMAL_HOUR_END:
+            return 0.0
+        # How far outside normal hours?
+        if current_hour < NORMAL_HOUR_START:
+            distance = NORMAL_HOUR_START - current_hour
+        else:
+            distance = current_hour - NORMAL_HOUR_END
+        if distance <= 2:
+            return 0.4
+        elif distance <= 4:
+            return 0.7
+        return 1.0
 
     # ─── History lookup ──────────────────────────────────────────────
 
@@ -173,7 +204,7 @@ class RiskEngine:
             top_factors.append({
                 "feature": feat,
                 "label": labels[feat],
-                "triggered": value == 1.0,
+                "triggered": value >= 0.5,
                 "weight": weights[feat],
                 "contribution": contribution,
                 "value": value,
@@ -193,6 +224,6 @@ class RiskEngine:
             "risk_level": risk_level,
             "action": actions.get(risk_level, "unknown"),
             "factors": top_factors,
-            "model": "weighted_history",
-            "formula": "min((new_device*0.4 + new_country*0.4 + rapid_attempts*0.6 + abnormal_time*0.2) / 1.6, 1.0)",
+            "model": "weighted_history_graduated",
+            "formula": "min((device*0.4 + country*0.4 + rapid*0.6 + time*0.2) / 1.6, 1.0) — graduated factors",
         }

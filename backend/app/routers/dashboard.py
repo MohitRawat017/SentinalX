@@ -71,6 +71,15 @@ async def get_overview(
     if wallet_address:
         enforcer = SecurityEnforcement.get_instance()
         enforcement = await enforcer.evaluate_and_enforce(db, wallet_address)
+        # Use the enforcement trust score (includes step-up bonus) for display
+        enf_score = enforcement["trust_score"]
+        if enf_score >= 80:
+            enf_level = "trusted"
+        elif enf_score >= 50:
+            enf_level = "monitoring"
+        else:
+            enf_level = "high_risk"
+        trust_score = {"score": enf_score, "level": enf_level}
 
     return {
         "stats": {
@@ -235,31 +244,44 @@ async def generate_security_report(
 def _compute_trust_score(login_events, guard_events, tx_events) -> dict:
     """
     Compute a unified Trust Score (0-100) from all risk engines.
-    Higher = more trusted. Continuously updated.
+    Higher = more trusted. Uses actual risk scores and recency decay.
     """
-    # Start at 100, deduct for risky behavior
     score = 100.0
 
-    # Login penalties (weight: 40%)
+    # Login penalties (max 40) — use actual risk scores with recency decay
     if login_events:
-        high_logins = sum(1 for e in login_events if e.risk_level == "high")
-        medium_logins = sum(1 for e in login_events if e.risk_level == "medium")
-        login_penalty = min(40, high_logins * 8 + medium_logins * 3)
-        score -= login_penalty
+        login_penalty = 0.0
+        for i, e in enumerate(login_events):
+            recency = max(0.5, 1.0 - i * 0.015)
+            severity = e.risk_score if e.risk_score else 0.5
+            if e.risk_level == "high":
+                login_penalty += 10 * severity * recency
+            elif e.risk_level == "medium":
+                login_penalty += 4 * severity * recency
+        score -= min(40, login_penalty)
 
-    # Guard penalties (weight: 30%)
+    # Guard penalties (max 30) — with recency decay
     if guard_events:
-        threats = sum(1 for e in guard_events if e.risk_detected)
-        overrides = sum(1 for e in guard_events if e.user_override)
-        guard_penalty = min(30, threats * 5 + overrides * 2)
-        score -= guard_penalty
+        guard_penalty = 0.0
+        for i, e in enumerate(guard_events):
+            recency = max(0.5, 1.0 - i * 0.015)
+            if e.risk_detected:
+                guard_penalty += 5 * recency
+            if e.user_override:
+                guard_penalty += 2 * recency
+        score -= min(30, guard_penalty)
 
-    # Transaction penalties (weight: 30%)
+    # Transaction penalties (max 30) — use actual risk scores with recency
     if tx_events:
-        blocked = sum(1 for e in tx_events if e.status == "blocked")
-        cooldowns = sum(1 for e in tx_events if e.cooldown_until is not None)
-        tx_penalty = min(30, blocked * 10 + cooldowns * 5)
-        score -= tx_penalty
+        tx_penalty = 0.0
+        for i, e in enumerate(tx_events):
+            recency = max(0.5, 1.0 - i * 0.015)
+            severity = e.risk_score if e.risk_score else 0.5
+            if e.status == "blocked":
+                tx_penalty += 12 * severity * recency
+            elif e.cooldown_until is not None:
+                tx_penalty += 6 * severity * recency
+        score -= min(30, tx_penalty)
 
     score = max(0, round(score))
 
