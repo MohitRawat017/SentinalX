@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import useStore from '../store';
-import { HiShieldCheck, HiChartBar, HiEye, HiLink, HiBeaker, HiArrowRightOnRectangle } from 'react-icons/hi2';
+import { HiShieldCheck, HiChartBar, HiChatBubbleLeftRight, HiLink, HiBeaker, HiArrowRightOnRectangle } from 'react-icons/hi2';
 
 export default function Navbar() {
   const { isAuthenticated, wallet, riskLevel, logout } = useStore();
@@ -9,7 +9,7 @@ export default function Navbar() {
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: HiChartBar },
-    { path: '/guard', label: 'GuardLayer', icon: HiEye },
+    { path: '/chat', label: 'Chat', icon: HiChatBubbleLeftRight },
     { path: '/audit', label: 'Audit Trail', icon: HiLink },
     { path: '/simulation', label: 'Simulation', icon: HiBeaker },
   ];

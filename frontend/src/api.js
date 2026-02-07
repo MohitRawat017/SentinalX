@@ -65,4 +65,18 @@ export const dashboardAPI = {
   securityReport: (wallet) => api.get('/dashboard/security-report', { params: { wallet_address: wallet } }),
 };
 
+// ─── Chat ───────────────────────────────────────────────────────
+export const chatAPI = {
+  send: (data) => api.post('/chat/send', data),
+  redact: (data) => api.post('/chat/redact', data),
+  messages: (wallet, peer, limit = 50) =>
+    api.get('/chat/messages', { params: { wallet, peer, limit } }),
+  contacts: (wallet) =>
+    api.get('/chat/contacts', { params: { wallet } }),
+  wsUrl: (wallet) => {
+    const base = API_BASE.replace(/^http/, 'ws');
+    return `${base}/chat/ws/${wallet}`;
+  },
+};
+
 export default api;

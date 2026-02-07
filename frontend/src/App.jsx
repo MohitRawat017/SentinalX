@@ -5,7 +5,7 @@ import Navbar from './components/Navbar';
 import Notifications from './components/Notifications';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
-import GuardLayerPage from './pages/GuardLayerPage';
+import ChatPage from './pages/ChatPage';
 import AuditPage from './pages/AuditPage';
 import SimulationPage from './pages/SimulationPage';
 
@@ -23,7 +23,7 @@ function App() {
           } />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/guard" element={<GuardLayerPage />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/simulation" element={<SimulationPage />} />
         </Routes>
