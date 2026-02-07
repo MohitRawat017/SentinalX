@@ -43,8 +43,12 @@ async def get_overview(
     batcher = MerkleBatcher.get_instance()
     merkle_stats = batcher.get_stats()
 
-    # Compute aggregates
-    total_logins = len(login_events)
+    # Compute aggregates - use COUNT query for accurate total (not limited by fetch limit)
+    count_query = select(func.count()).select_from(LoginEvent)
+    if wallet_address:
+        count_query = count_query.where(LoginEvent.wallet_address == wallet_address.lower())
+    count_result = await db.execute(count_query)
+    total_logins = count_result.scalar() or 0
     risk_scores = [e.risk_score for e in login_events]
     avg_risk = round(sum(risk_scores) / len(risk_scores), 4) if risk_scores else 0
 
@@ -134,7 +138,12 @@ async def generate_security_report(
     batcher = MerkleBatcher.get_instance()
 
     # Build report (deterministic, no LLM needed)
-    total_logins = len(logins)
+    # Use COUNT query for accurate total (not limited by fetch limit)
+    count_query = select(func.count()).select_from(LoginEvent)
+    if wallet_address:
+        count_query = count_query.where(LoginEvent.wallet_address == wallet_address.lower())
+    count_result = await db.execute(count_query)
+    total_logins = count_result.scalar() or 0
     high_risk = [e for e in logins if e.risk_level == "high"]
     unique_countries = list(set(e.geo_country for e in logins if e.geo_country))
     threats = [e for e in guards if e.risk_detected]

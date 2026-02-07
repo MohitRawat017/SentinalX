@@ -126,15 +126,19 @@ async def send_message(req: SendRequest, db: AsyncSession = Depends(get_db)):
         "risk_detected": scan_result["is_risky"],
     })
 
-    # Push via WebSocket to receiver
-    await manager.send_to(req.receiver_wallet, {
+    # Push via WebSocket to both sender and receiver
+    ws_payload = {
         "type": "new_message",
         "message_id": msg.id,
         "sender": req.sender_wallet.lower(),
+        "receiver": req.receiver_wallet.lower(),
         "content": req.text,
         "risk_detected": scan_result["is_risky"],
+        "redacted": False,
         "timestamp": msg.timestamp.isoformat() + "Z",
-    })
+    }
+    await manager.send_to(req.receiver_wallet, ws_payload)
+    await manager.send_to(req.sender_wallet, ws_payload)
 
     return SendResponse(
         status="delivered",
@@ -189,15 +193,19 @@ async def redact_and_send(req: RedactRequest, db: AsyncSession = Depends(get_db)
         "method": redaction["method"],
     })
 
-    # Push via WebSocket
-    await manager.send_to(req.receiver_wallet, {
+    # Push via WebSocket to both sender and receiver
+    ws_payload = {
         "type": "new_message",
         "message_id": msg.id,
         "sender": req.sender_wallet.lower(),
+        "receiver": req.receiver_wallet.lower(),
         "content": redacted_text,
         "redacted": True,
+        "risk_detected": True,
         "timestamp": msg.timestamp.isoformat() + "Z",
-    })
+    }
+    await manager.send_to(req.receiver_wallet, ws_payload)
+    await manager.send_to(req.sender_wallet, ws_payload)
 
     return SendResponse(
         status="redacted_and_delivered",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../store';
 import { chatAPI } from '../api';
 import {
@@ -20,56 +20,88 @@ export default function ChatPage() {
   const [newPeer, setNewPeer] = useState('');
   const [showNewChat, setShowNewChat] = useState(false);
   const [warning, setWarning] = useState(null);
+  const [wsStatus, setWsStatus] = useState('disconnected');
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
+  const selectedPeerRef = useRef('');
+
+  // Keep ref in sync with state so WebSocket handler always has latest value
+  useEffect(() => {
+    selectedPeerRef.current = selectedPeer;
+  }, [selectedPeer]);
 
   // Fetch contacts on mount
   useEffect(() => {
     if (wallet) fetchContacts();
   }, [wallet]);
 
-  // Connect WebSocket
+  // Connect WebSocket with auto-reconnect
   useEffect(() => {
     if (!wallet) return;
-    const url = chatAPI.wsUrl(wallet);
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    let reconnectTimer = null;
+    let alive = true;
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'new_message' && data.sender === selectedPeer) {
-        setMessages((prev) => [...prev, {
-          id: data.message_id,
-          sender: data.sender,
-          receiver: wallet.toLowerCase(),
-          content: data.content,
-          redacted: data.redacted || false,
-          timestamp: data.timestamp,
-        }]);
-      }
-      // Send heartbeat
-      if (data.type !== 'pong') {
-        fetchContacts();
-      }
-    };
+    function connect() {
+      const url = chatAPI.wsUrl(wallet);
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
 
-    ws.onopen = () => {
-      // Heartbeat every 30s
-      const interval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send('ping');
+      ws.onopen = () => {
+        setWsStatus('connected');
+        // Heartbeat every 25s to keep Render connection alive
+        ws._heartbeat = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+        }, 25000);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'new_message') {
+          const peer = selectedPeerRef.current;
+          // Show message if it's from or to the currently selected peer
+          if (data.sender === peer || data.receiver === peer) {
+            setMessages((prev) => {
+              // Dedupe by message_id
+              if (prev.some((m) => m.id === data.message_id)) return prev;
+              return [...prev, {
+                id: data.message_id,
+                sender: data.sender,
+                receiver: data.receiver || wallet.toLowerCase(),
+                content: data.content,
+                redacted: data.redacted || false,
+                risk_detected: data.risk_detected || false,
+                timestamp: data.timestamp,
+              }];
+            });
+          }
+          fetchContacts();
         }
-      }, 30000);
-      ws._heartbeat = interval;
-    };
+      };
 
-    ws.onclose = () => {
-      if (ws._heartbeat) clearInterval(ws._heartbeat);
-    };
+      ws.onclose = () => {
+        setWsStatus('disconnected');
+        if (ws._heartbeat) clearInterval(ws._heartbeat);
+        // Auto-reconnect after 3s
+        if (alive) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    connect();
 
     return () => {
-      if (ws._heartbeat) clearInterval(ws._heartbeat);
-      ws.close();
+      alive = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      const ws = wsRef.current;
+      if (ws) {
+        if (ws._heartbeat) clearInterval(ws._heartbeat);
+        ws.close();
+      }
     };
   }, [wallet]);
 
@@ -116,10 +148,8 @@ export default function ChatPage() {
       });
 
       if (res.data.status === 'warning') {
-        // DLP detected sensitive content
         setWarning(res.data);
       } else {
-        // Delivered
         setText('');
         fetchMessages();
         fetchContacts();
@@ -187,14 +217,20 @@ export default function ChatPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <HiChatBubbleLeftRight className="w-7 h-7 text-blue-400" />
-          Secure Chat
-        </h1>
-        <p className="text-gray-400 text-sm mt-1">
-          End-to-end messaging with GuardLayer DLP protection
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <HiChatBubbleLeftRight className="w-7 h-7 text-blue-400" />
+            Secure Chat
+          </h1>
+          <p className="text-gray-400 text-sm mt-1">
+            End-to-end messaging with GuardLayer DLP protection
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className={`w-2 h-2 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-500 pulse-dot' : 'bg-gray-600'}`} />
+          <span className="text-xs text-gray-500">{wsStatus === 'connected' ? 'Live' : 'Reconnecting...'}</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4" style={{ height: 'calc(100vh - 14rem)' }}>
