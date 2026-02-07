@@ -11,7 +11,7 @@ const api = axios.create({
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('sentinelx_token');
+  const token = sessionStorage.getItem('sentinelx_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -67,15 +67,13 @@ export const dashboardAPI = {
 
 // ─── Chat ───────────────────────────────────────────────────────
 export const chatAPI = {
-  send: (data) => api.post('/chat/send', data),
-  redact: (data) => api.post('/chat/redact', data),
-  messages: (wallet, peer, limit = 50) =>
-    api.get('/chat/messages', { params: { wallet, peer, limit } }),
-  contacts: (wallet) =>
-    api.get('/chat/contacts', { params: { wallet } }),
-  wsUrl: (wallet) => {
+  conversations: (wallet) =>
+    api.get('/chat/conversations', { params: { wallet } }),
+  messages: (conversationId, limit = 50) =>
+    api.get(`/chat/conversations/${conversationId}/messages`, { params: { limit } }),
+  wsUrl: (token) => {
     const base = API_BASE.replace(/^http/, 'ws');
-    return `${base}/chat/ws/${wallet}`;
+    return `${base}/chat/ws?token=${encodeURIComponent(token)}`;
   },
 };
 

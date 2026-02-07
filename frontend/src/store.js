@@ -2,15 +2,15 @@ import { create } from 'zustand';
 
 const useStore = create((set, get) => ({
   // ─── Auth State ───────────────────────────────────────────────
-  wallet: null,
-  token: localStorage.getItem('sentinelx_token') || null,
-  isAuthenticated: !!localStorage.getItem('sentinelx_token'),
+  wallet: sessionStorage.getItem('sentinelx_wallet') || null,
+  token: sessionStorage.getItem('sentinelx_token') || null,
+  isAuthenticated: !!sessionStorage.getItem('sentinelx_token'),
   riskLevel: null,
   riskScore: null,
 
   setAuth: (wallet, token, riskLevel, riskScore) => {
-    localStorage.setItem('sentinelx_token', token);
-    localStorage.setItem('sentinelx_wallet', wallet);
+    sessionStorage.setItem('sentinelx_token', token);
+    sessionStorage.setItem('sentinelx_wallet', wallet);
     set({
       wallet,
       token,
@@ -21,8 +21,8 @@ const useStore = create((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('sentinelx_token');
-    localStorage.removeItem('sentinelx_wallet');
+    sessionStorage.removeItem('sentinelx_token');
+    sessionStorage.removeItem('sentinelx_wallet');
     set({
       wallet: null,
       token: null,

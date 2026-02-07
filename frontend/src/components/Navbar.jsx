@@ -1,11 +1,17 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import useStore from '../store';
 import { HiShieldCheck, HiChartBar, HiChatBubbleLeftRight, HiLink, HiBeaker, HiArrowRightOnRectangle } from 'react-icons/hi2';
 
 export default function Navbar() {
   const { isAuthenticated, wallet, riskLevel, logout } = useStore();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: HiChartBar },
@@ -74,7 +80,7 @@ export default function Navbar() {
                   </span>
                 </div>
                 <button
-                  onClick={logout}
+                  onClick={handleLogout}
                   className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
                   title="Disconnect"
                 >

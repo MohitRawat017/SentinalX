@@ -88,19 +88,35 @@ class Nonce(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
+class Conversation(Base):
+    __tablename__ = "conversations"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationParticipant(Base):
+    __tablename__ = "conversation_participants"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    conversation_id = Column(String, nullable=False, index=True)
+    wallet_address = Column(String, nullable=False, index=True)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    conversation_id = Column(String, nullable=False, index=True)
     sender_wallet = Column(String, nullable=False, index=True)
-    receiver_wallet = Column(String, nullable=False, index=True)
     content = Column(Text, nullable=False)
     content_hash = Column(String, nullable=False)
-    is_scanned = Column(Boolean, default=True)
-    risk_detected = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_delivered = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False)
+    risk_score = Column(Float, default=0.0)
+    was_blocked = Column(Boolean, default=False)
+    event_hash = Column(String, nullable=True)
     risk_categories = Column(JSON, nullable=True)
     redacted = Column(Boolean, default=False)
-    redacted_content = Column(Text, nullable=True)
     user_override = Column(Boolean, default=False)
-    event_hash = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
