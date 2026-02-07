@@ -1,0 +1,18 @@
+{
+  "name": "@sentinelx/sdk",
+  "version": "1.0.0",
+  "description": "SentinelX JavaScript SDK — Drop-in auth + data leak prevention",
+  "main": "dist/sentinelx.umd.js",
+  "module": "dist/sentinelx.esm.js",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch"
+  },
+  "files": ["dist/", "src/"],
+  "keywords": ["web3", "security", "siwe", "dlp", "ethereum"],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.19.12"
+  }
+}
