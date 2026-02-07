@@ -209,14 +209,17 @@ body {
 .landing-right-card {
   background: linear-gradient(145deg, #e8f5e9 0%, #d4edda 100%);
   border-radius: 24px;
-  padding: 3rem 2.5rem;
-  width: 480px;
-  height: 480px;
+  padding: 2.5rem 2rem;
+  width: calc(100vh - 40px);
+  height: calc(100vh - 40px);
+  max-width: calc(100% - 20px);
+  aspect-ratio: 1 / 1;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   text-align: center;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  overflow: hidden;
 }
 
 /* Logo */
