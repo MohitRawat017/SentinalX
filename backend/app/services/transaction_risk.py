@@ -28,7 +28,7 @@ THRESHOLD_SAFE = 0.3       # < 0.3 = safe (80-100 display)
 THRESHOLD_STEP_UP = 0.6    # 0.3-0.6 = step-up (50-79 display)
 # > 0.6 = blocked + cooldown (< 50 display)
 
-COOLDOWN_MINUTES = 10
+COOLDOWN_MINUTES = 1  # 1 minute (reduced for testing)
 
 # Urgency phrases for social engineering detection
 URGENCY_PHRASES = [

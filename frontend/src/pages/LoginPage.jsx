@@ -4,6 +4,44 @@ import useStore from '../store';
 import { authAPI } from '../api';
 import { HiShieldCheck, HiBolt, HiCpuChip, HiLockClosed, HiCommandLine, HiExclamationTriangle, HiFingerPrint } from 'react-icons/hi2';
 
+// ─── Geolocation utility ────────────────────────────────────────────
+async function getGeolocation() {
+  try {
+    // IP-based geolocation for city/country + coordinates
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('https://ipapi.co/json/', { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await res.json();
+    const result = {
+      geo_lat: data.latitude,
+      geo_lng: data.longitude,
+      geo_country: data.country_name,
+      geo_city: data.city,
+    };
+
+    // Try browser Geolocation API for more accurate coordinates
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 5000,
+            enableHighAccuracy: false,
+          });
+        });
+        result.geo_lat = pos.coords.latitude;
+        result.geo_lng = pos.coords.longitude;
+      } catch {
+        // Browser geolocation denied/failed — keep IP-based coords
+      }
+    }
+
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -112,6 +150,7 @@ export default function LoginPage() {
           signature,
           wallet_address: wallet,
           user_agent: navigator.userAgent,
+          ...(await getGeolocation()),
         });
 
         if (verifyRes.data.success) {
@@ -165,10 +204,7 @@ export default function LoginPage() {
         signature,
         wallet_address: demoWallet,
         user_agent: navigator.userAgent,
-        geo_lat: 37.7749,
-        geo_lng: -122.4194,
-        geo_country: 'United States',
-        geo_city: 'San Francisco',
+        ...(await getGeolocation()),
       });
 
       if (verifyRes.data.success) {

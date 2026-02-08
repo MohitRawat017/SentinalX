@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import useStore from '../store';
 import { dashboardAPI, simulationAPI } from '../api';
 import RiskTimeline from '../components/RiskTimeline';
@@ -8,12 +8,15 @@ import RecentEvents from '../components/RecentEvents';
 import SecurityReport from '../components/SecurityReport';
 import { HiArrowPath, HiBolt, HiShieldCheck, HiLockClosed, HiExclamationTriangle, HiShieldExclamation } from 'react-icons/hi2';
 
+const POLL_INTERVAL = 15000; // 15 seconds
+
 export default function Dashboard() {
   const { wallet, dashboardData, setDashboardData, setLoading, isLoading, addNotification, setEnforcement } = useStore();
   const [report, setReport] = useState(null);
+  const pollRef = useRef(null);
 
-  const fetchDashboard = async () => {
-    setLoading(true);
+  const fetchDashboard = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await dashboardAPI.overview(wallet);
       setDashboardData(res.data);
@@ -24,8 +27,15 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Dashboard fetch error:', err);
     }
-    setLoading(false);
-  };
+    if (!silent) setLoading(false);
+  }, [wallet]);
+
+  useEffect(() => {
+    fetchDashboard();
+    // Auto-refresh every 15s (silent — no loading spinner)
+    pollRef.current = setInterval(() => fetchDashboard(true), POLL_INTERVAL);
+    return () => clearInterval(pollRef.current);
+  }, [wallet, fetchDashboard]);
 
   const seedDemoData = async () => {
     setLoading(true);
@@ -55,10 +65,6 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchDashboard();
-  }, [wallet]);
-
   const data = dashboardData;
 
   return (
@@ -84,7 +90,7 @@ export default function Dashboard() {
             📊 Security Report
           </button>
           <button
-            onClick={fetchDashboard}
+            onClick={() => fetchDashboard(false)}
             disabled={isLoading}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-all text-sm font-medium"
           >
