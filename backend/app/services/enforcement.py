@@ -102,6 +102,12 @@ class SecurityEnforcement:
                 security_status = "locked"
                 locked_until = state.locked_until
                 cooldown_reason = state.cooldown_reason
+            # If lock JUST expired, transition gracefully — don't re-lock from old events
+            elif state.security_status == "locked" and state.locked_until and state.locked_until <= now:
+                if security_status == "locked":
+                    security_status = "step_up_required"
+                    locked_until = None
+                    cooldown_reason = None
             state.trust_score = trust_score
             state.security_status = security_status
             state.locked_until = locked_until
@@ -286,12 +292,16 @@ class SecurityEnforcement:
         if trust_score >= TRUST_STEP_UP_THRESHOLD:
             return "step_up_required", None, None
 
-        # Below 50 → check severity
+        # Below 50 → check severity, but only from a recent time window
+        # so old events don't perpetually re-lock the account
+        lock_window = now - timedelta(minutes=LOCKOUT_COOLDOWN_MINUTES * 3)
         recent_high_logins = sum(
-            1 for e in login_events[:20] if e.risk_level == "high"
+            1 for e in login_events[:20]
+            if e.risk_level == "high" and e.timestamp and e.timestamp > lock_window
         )
         recent_blocked_tx = sum(
-            1 for e in tx_events[:20] if e.status == "blocked"
+            1 for e in tx_events[:20]
+            if e.status == "blocked" and e.created_at and e.created_at > lock_window
         )
 
         if recent_high_logins >= 3 or recent_blocked_tx >= 2:

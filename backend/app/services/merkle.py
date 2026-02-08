@@ -192,6 +192,7 @@ class MerkleBatcher:
                     "id": b["id"],
                     "merkle_root": b["merkle_root"],
                     "event_count": b["event_count"],
+                    "event_hashes": b.get("event_hashes", []),
                     "status": b["status"],
                     "tx_hash": b["tx_hash"],
                     "created_at": b["created_at"],

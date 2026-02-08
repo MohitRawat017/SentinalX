@@ -446,30 +446,12 @@ Text to redact:
     async def redact(self, text: str) -> Dict:
         """
         Redact sensitive data from text.
-        Uses LLM if available, otherwise falls back to regex replacement.
+        Uses regex first (deterministic, preserves surrounding text),
+        falls back to LLM only if regex didn't redact anything but scan flagged risk.
         """
-        # Try LLM redaction first
-        if self.openai_client:
-            try:
-                response = await self.openai_client.chat.completions.create(
-                    model="meta-llama/llama-3.2-3b-instruct:free",
-                    messages=[
-                        {"role": "system", "content": "You are a data redaction engine. Return only the redacted text."},
-                        {"role": "user", "content": self.REDACT_PROMPT.format(text=text[:2000])},
-                    ],
-                    temperature=0.0,
-                    max_tokens=1000,
-                )
-                redacted_text = response.choices[0].message.content.strip()
-                return {
-                    "original_hash": hashlib.sha256(text.encode()).hexdigest(),
-                    "redacted_text": redacted_text,
-                    "method": "llm",
-                }
-            except Exception:
-                pass
+        original_hash = hashlib.sha256(text.encode()).hexdigest()
 
-        # Fallback: regex-based redaction using all pattern categories
+        # Primary: regex-based redaction — precise, only replaces matched patterns
         redacted_text = text
         for key, config in self.HIGH_CRITICAL_PATTERNS.items():
             label = key.upper()
@@ -478,8 +460,40 @@ Text to redact:
             label = key.upper()
             redacted_text = re.sub(config["pattern"], f"[REDACTED-{label}]", redacted_text)
 
+        # If regex caught something, use it — it preserves surrounding text
+        if redacted_text != text:
+            return {
+                "original_hash": original_hash,
+                "redacted_text": redacted_text,
+                "method": "regex",
+            }
+
+        # Fallback: LLM redaction for patterns regex might miss
+        if self.openai_client:
+            try:
+                response = await self.openai_client.chat.completions.create(
+                    model="meta-llama/llama-3.2-3b-instruct:free",
+                    messages=[
+                        {"role": "system", "content": "You are a data redaction engine. Return only the redacted text. Keep all non-sensitive words intact."},
+                        {"role": "user", "content": self.REDACT_PROMPT.format(text=text[:2000])},
+                    ],
+                    temperature=0.0,
+                    max_tokens=1000,
+                )
+                llm_redacted = response.choices[0].message.content.strip()
+                # Sanity check: LLM should preserve most of the text, not nuke it all
+                if llm_redacted and len(llm_redacted) >= len(text) * 0.3 and llm_redacted.lower() != "[redacted]":
+                    return {
+                        "original_hash": original_hash,
+                        "redacted_text": llm_redacted,
+                        "method": "llm",
+                    }
+            except Exception:
+                pass
+
+        # Nothing to redact
         return {
-            "original_hash": hashlib.sha256(text.encode()).hexdigest(),
+            "original_hash": original_hash,
             "redacted_text": redacted_text,
             "method": "regex",
         }
