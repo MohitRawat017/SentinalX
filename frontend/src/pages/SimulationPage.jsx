@@ -74,34 +74,36 @@ export default function SimulationPage() {
 
       {/* Scenario Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {scenarios.map((scenario) => {
-          const Icon = scenarioIcons[scenario.id] || HiBolt;
-          const gradient = scenarioColors[scenario.id] || 'from-blue-600 to-purple-600';
+        {scenarios
+          .filter((s) => !['risky_transaction', 'safe_transaction', 'clean_text'].includes(s.id))
+          .map((scenario) => {
+            const Icon = scenarioIcons[scenario.id] || HiBolt;
+            const gradient = scenarioColors[scenario.id] || 'from-blue-600 to-purple-600';
 
-          return (
-            <div key={scenario.id} className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-6 hover:border-emerald-500/30 transition-all group">
-              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-4 group-hover:shadow-lg transition-all`}>
-                <Icon className="w-6 h-6 text-white" />
+            return (
+              <div key={scenario.id} className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-6 hover:border-emerald-500/30 transition-all group">
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-4 group-hover:shadow-lg transition-all`}>
+                  <Icon className="w-6 h-6 text-white" />
+                </div>
+                <h3 className="text-lg font-semibold text-white mb-1">{scenario.name}</h3>
+                <p className="text-sm text-gray-400 mb-4">{scenario.description}</p>
+                <button
+                  onClick={() => runScenario(scenario.id)}
+                  disabled={running !== null}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r ${gradient} hover:opacity-90 text-white font-medium text-sm transition-all disabled:opacity-50`}
+                >
+                  {running === scenario.id ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <HiPlay className="w-4 h-4" />
+                      Run Simulation
+                    </>
+                  )}
+                </button>
               </div>
-              <h3 className="text-lg font-semibold text-white mb-1">{scenario.name}</h3>
-              <p className="text-sm text-gray-400 mb-4">{scenario.description}</p>
-              <button
-                onClick={() => runScenario(scenario.id)}
-                disabled={running !== null}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r ${gradient} hover:opacity-90 text-white font-medium text-sm transition-all disabled:opacity-50`}
-              >
-                {running === scenario.id ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <HiPlay className="w-4 h-4" />
-                    Run Simulation
-                  </>
-                )}
-              </button>
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
 
       {/* Results */}
@@ -160,7 +162,7 @@ export default function SimulationPage() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-2.5 h-2.5 rounded-full ${event.risk_level === 'high' || event.is_risky ? 'bg-red-500' :
-                      event.risk_level === 'medium' ? 'bg-yellow-500' : 'bg-emerald-500'
+                    event.risk_level === 'medium' ? 'bg-yellow-500' : 'bg-emerald-500'
                     }`} />
                   <div>
                     <p className="text-sm text-white">
@@ -185,15 +187,15 @@ export default function SimulationPage() {
                 <div className="text-right">
                   {event.risk_score !== undefined && (
                     <span className={`text-sm font-mono font-bold ${event.risk_level === 'high' ? 'text-red-400' :
-                        event.risk_level === 'medium' ? 'text-yellow-400' : 'text-emerald-400'
+                      event.risk_level === 'medium' ? 'text-yellow-400' : 'text-emerald-400'
                       }`}>
                       {event.risk_score?.toFixed(3)}
                     </span>
                   )}
                   {event.severity && (
                     <span className={`text-xs px-2 py-0.5 rounded-full ${event.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                        event.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
-                          'bg-yellow-500/20 text-yellow-400'
+                      event.severity === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                        'bg-yellow-500/20 text-yellow-400'
                       }`}>
                       {event.severity}
                     </span>

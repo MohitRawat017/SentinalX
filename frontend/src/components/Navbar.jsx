@@ -15,8 +15,8 @@ export default function Navbar() {
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: HiChartBar },
-    { path: '/chat', label: 'Chat', icon: HiChatBubbleLeftRight },
-    { path: '/audit', label: 'Audit Trail', icon: HiLink },
+    { path: '/chat', label: 'TrustChat', icon: HiChatBubbleLeftRight },
+    { path: '/audit', label: 'Security Evidence', icon: HiLink },
     { path: '/simulation', label: 'Simulation', icon: HiBeaker },
   ];
 
@@ -50,8 +50,8 @@ export default function Navbar() {
                   key={path}
                   to={path}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isActive(path)
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
                     }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -68,8 +68,8 @@ export default function Navbar() {
                 {/* Enforcement Status Indicator */}
                 {securityStatus && securityStatus !== 'active' && (
                   <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold ${securityStatus === 'locked' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                      securityStatus === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                        'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                    securityStatus === 'restricted' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                      'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
                     }`}>
                     {securityStatus === 'locked' ? (
                       <><HiLockClosed className="w-3 h-3" /> LOCKED</>
@@ -82,14 +82,14 @@ export default function Navbar() {
                 )}
                 {dashboardData?.trust_score && (
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${dashboardData.trust_score.level === 'trusted' ? 'bg-emerald-500/10 border-emerald-500/30' :
-                      dashboardData.trust_score.level === 'monitoring' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                        'bg-red-500/10 border-red-500/30'
+                    dashboardData.trust_score.level === 'monitoring' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                      'bg-red-500/10 border-red-500/30'
                     }`}>
                     <HiShieldCheck className={`w-3.5 h-3.5 ${dashboardData.trust_score.level === 'trusted' ? 'text-emerald-400' :
-                        dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+                      dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
                       }`} />
                     <span className={`text-xs font-bold ${dashboardData.trust_score.level === 'trusted' ? 'text-emerald-400' :
-                        dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
+                      dashboardData.trust_score.level === 'monitoring' ? 'text-yellow-400' : 'text-red-400'
                       }`}>
                       {dashboardData.trust_score.score}
                     </span>

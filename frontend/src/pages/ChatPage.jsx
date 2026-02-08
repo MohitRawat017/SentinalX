@@ -440,7 +440,7 @@ export default function ChatPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <HiChatBubbleLeftRight className="w-7 h-7 text-emerald-400" />
-            Secure Chat
+            TrustChat
           </h1>
           <p className="text-gray-400 text-sm mt-1">
             End-to-end messaging with GuardLayer DLP protection
@@ -449,8 +449,8 @@ export default function ChatPage() {
         <div className="flex items-center gap-1.5">
           <div
             className={`w-2 h-2 rounded-full ${wsStatus === 'connected'
-                ? 'bg-emerald-500 pulse-dot'
-                : 'bg-gray-600'
+              ? 'bg-emerald-500 pulse-dot'
+              : 'bg-gray-600'
               }`}
           />
           <span className="text-xs text-gray-500">
@@ -512,8 +512,8 @@ export default function ChatPage() {
                     setWarning(null);
                   }}
                   className={`w-full text-left p-3 rounded-lg transition-all ${selectedConv === c.conversation_id
-                      ? 'bg-emerald-500/20 border border-emerald-500/30'
-                      : 'hover:bg-white/5 border border-transparent'
+                    ? 'bg-emerald-500/20 border border-emerald-500/30'
+                    : 'hover:bg-white/5 border border-transparent'
                     }`}
                 >
                   <div className="flex items-center justify-between">
@@ -635,14 +635,14 @@ export default function ChatPage() {
                         <div>
                           <p className="text-xs text-gray-400">Transaction Risk Score</p>
                           <p className={`text-2xl font-bold ${txRisk.risk_level === 'low' ? 'text-emerald-400' :
-                              txRisk.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
+                            txRisk.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
                             }`}>
                             {txRisk.display_score}/100
                           </p>
                         </div>
                         <div className={`px-3 py-1 rounded-full text-xs font-bold ${txRisk.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                            txRisk.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                              'bg-red-500/20 text-red-400 border border-red-500/30'
+                          txRisk.risk_level === 'medium' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                            'bg-red-500/20 text-red-400 border border-red-500/30'
                           }`}>
                           {txRisk.risk_level.toUpperCase()}
                         </div>
@@ -717,8 +717,8 @@ export default function ChatPage() {
                       >
                         <div
                           className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${isMine
-                              ? 'bg-blue-600 text-white rounded-br-md'
-                              : 'bg-sentinel-dark border border-sentinel-border text-gray-200 rounded-bl-md'
+                            ? 'bg-blue-600 text-white rounded-br-md'
+                            : 'bg-sentinel-dark border border-sentinel-border text-gray-200 rounded-bl-md'
                             }`}
                         >
                           <p className="text-sm whitespace-pre-wrap break-words">
