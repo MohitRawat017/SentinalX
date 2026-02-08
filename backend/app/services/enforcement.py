@@ -21,7 +21,7 @@ from app.models.models import (
 TRUST_ACTIVE_THRESHOLD = 80       # >= 80 → active
 TRUST_STEP_UP_THRESHOLD = 50      # 50-79 → step_up_required
 # <50 → restricted / locked
-LOCKOUT_COOLDOWN_MINUTES = 30     # how long a "locked" session lasts
+LOCKOUT_COOLDOWN_MINUTES = 1      # how long a "locked" session lasts (1 min for demo)
 
 
 class SecurityEnforcement:
