@@ -5,41 +5,71 @@ import { authAPI } from '../api';
 import { HiShieldCheck, HiBolt, HiCpuChip, HiLockClosed, HiCommandLine, HiExclamationTriangle, HiFingerPrint } from 'react-icons/hi2';
 
 // ─── Geolocation utility ────────────────────────────────────────────
+// Priority: Browser Geolocation API (GPS/WiFi) → IP-based fallback
 async function getGeolocation() {
-  try {
-    // IP-based geolocation for city/country + coordinates
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch('https://ipapi.co/json/', { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json();
-    const result = {
-      geo_lat: data.latitude,
-      geo_lng: data.longitude,
-      geo_country: data.country_name,
-      geo_city: data.city,
-    };
+  let coords = { lat: null, lng: null };
+  let locationInfo = { country: null, city: null };
 
-    // Try browser Geolocation API for more accurate coordinates
-    if (navigator.geolocation) {
-      try {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            timeout: 5000,
-            enableHighAccuracy: false,
-          });
+  // 1. Try Browser Geolocation API first (most accurate - uses GPS/WiFi)
+  if (navigator.geolocation) {
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 10000,
+          enableHighAccuracy: true, // Use GPS if available
+          maximumAge: 60000, // Cache for 1 minute
         });
-        result.geo_lat = pos.coords.latitude;
-        result.geo_lng = pos.coords.longitude;
-      } catch {
-        // Browser geolocation denied/failed — keep IP-based coords
-      }
-    }
+      });
+      coords.lat = pos.coords.latitude;
+      coords.lng = pos.coords.longitude;
 
-    return result;
-  } catch {
-    return {};
+      // Reverse geocode to get city/country from coordinates
+      try {
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json`,
+          { headers: { 'User-Agent': 'SentinelX-App' } }
+        );
+        const geoData = await geoRes.json();
+        locationInfo.city = geoData.address?.city || geoData.address?.town || geoData.address?.village || geoData.address?.state_district;
+        locationInfo.country = geoData.address?.country;
+        // Add state for Indian addresses
+        if (geoData.address?.state) {
+          locationInfo.city = `${locationInfo.city}, ${geoData.address.state}`;
+        }
+      } catch {
+        // Reverse geocoding failed, continue with coords only
+      }
+    } catch {
+      // Browser geolocation denied or failed, try IP-based
+    }
   }
+
+  // 2. Fallback: IP-based geolocation (less accurate)
+  if (!coords.lat || !coords.lng) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch('https://ipapi.co/json/', { signal: controller.signal });
+      clearTimeout(timeout);
+      const data = await res.json();
+      coords.lat = data.latitude;
+      coords.lng = data.longitude;
+      locationInfo.country = data.country_name;
+      locationInfo.city = data.city;
+      if (data.region) {
+        locationInfo.city = `${data.city}, ${data.region}`;
+      }
+    } catch {
+      // All geolocation methods failed
+    }
+  }
+
+  return {
+    geo_lat: coords.lat,
+    geo_lng: coords.lng,
+    geo_country: locationInfo.country,
+    geo_city: locationInfo.city,
+  };
 }
 
 export default function LoginPage() {
@@ -267,7 +297,7 @@ export default function LoginPage() {
               <div className="mb-6 flex items-center justify-between p-3 rounded-lg bg-sentinel-dark/50 border border-sentinel-border">
                 <span className="text-sm text-gray-400">Current Trust Score</span>
                 <span className={`text-lg font-bold font-mono ${authResult.trust_score >= 80 ? 'text-emerald-400' :
-                    authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
+                  authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
                   }`}>
                   {authResult.trust_score}/100
                 </span>
@@ -341,10 +371,10 @@ export default function LoginPage() {
             <div className={`landing-success ${authResult.security_status === 'locked' ? '!border-red-500/30 !bg-red-500/5' : ''}`}>
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full ${authResult.security_status === 'locked' ? 'bg-red-500' :
-                    authResult.security_status === 'restricted' ? 'bg-yellow-500' : 'bg-emerald-500'
+                  authResult.security_status === 'restricted' ? 'bg-yellow-500' : 'bg-emerald-500'
                   }`} />
                 <span className={`text-sm font-medium ${authResult.security_status === 'locked' ? 'text-red-400' :
-                    authResult.security_status === 'restricted' ? 'text-yellow-400' : 'text-emerald-400'
+                  authResult.security_status === 'restricted' ? 'text-yellow-400' : 'text-emerald-400'
                   }`}>
                   {authResult.security_status === 'locked' ? 'Account Locked' :
                     authResult.security_status === 'restricted' ? 'Session Restricted' : 'Authenticated'}
@@ -357,12 +387,12 @@ export default function LoginPage() {
                   }`}>{authResult.risk_level?.toUpperCase()}</span></p>
                 {authResult.trust_score != null && (
                   <p>Trust Score: <span className={`font-bold ${authResult.trust_score >= 80 ? 'text-emerald-400' :
-                      authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
+                    authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
                     }`}>{authResult.trust_score}/100</span></p>
                 )}
                 {authResult.security_status && authResult.security_status !== 'active' && (
                   <p>Status: <span className={`font-medium ${authResult.security_status === 'locked' ? 'text-red-400' :
-                      authResult.security_status === 'restricted' ? 'text-red-400' : 'text-yellow-400'
+                    authResult.security_status === 'restricted' ? 'text-red-400' : 'text-yellow-400'
                     }`}>{authResult.security_status.replace('_', ' ').toUpperCase()}</span></p>
                 )}
                 {authResult.locked_until && (
