@@ -206,9 +206,13 @@ class TransactionRiskEngine:
     # ─── History ──────────────────────────────────────────────────────
 
     async def _get_history(self, db: AsyncSession, wallet: str, limit: int = 50) -> List[TransactionEvent]:
+        """Fetch only COMPLETED transactions (actually sent) for risk baseline."""
         result = await db.execute(
             select(TransactionEvent)
-            .where(TransactionEvent.sender_wallet == wallet)
+            .where(
+                TransactionEvent.sender_wallet == wallet,
+                TransactionEvent.status == "completed",
+            )
             .order_by(desc(TransactionEvent.created_at))
             .limit(limit)
         )

@@ -30,6 +30,7 @@ class ScanRequest(BaseModel):
 class ScanResponse(BaseModel):
     is_risky: bool
     severity: str
+    risk_score: int = 0
     categories: list
     regex_findings: list
     llm_result: Optional[dict] = None
@@ -89,6 +90,7 @@ async def scan_content(req: ScanRequest, db: AsyncSession = Depends(get_db)):
     return ScanResponse(
         is_risky=result["is_risky"],
         severity=result["severity"],
+        risk_score=result.get("risk_score", 0),
         categories=result["categories"],
         regex_findings=result["regex_findings"],
         llm_result=result.get("llm_result"),
