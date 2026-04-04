@@ -16,6 +16,7 @@ import {
   DEMO_LOGIN_SIGNATURE,
   DEMO_STEP_UP_SIGNATURE,
   DEMO_WALLET,
+  isMobilePeraFlow,
   signMessageWithPera,
 } from '../api/blockchain';
 import useStore from '../store';
@@ -87,17 +88,67 @@ async function getGeolocation() {
   };
 }
 
-function getErrorMessage(err, fallback) {
+function getErrorMessage(err, fallback, isMobile) {
   if (err?.response?.data?.detail) {
     return err.response.data.detail;
   }
 
+  const errorType = err?.data?.type;
   const message = err?.message || '';
+
+  if (errorType === 'CONNECT_MODAL_CLOSED' || errorType === 'CONNECT_CANCELLED') {
+    return isMobile
+      ? 'Pera Wallet connection was cancelled. Open the app again and approve to continue.'
+      : 'Pera connection was cancelled. Reopen the QR modal and scan it with Pera Wallet on your phone.';
+  }
+
+  if (
+    errorType === 'SIGN_DATA_CANCELLED' ||
+    errorType === 'SIGN_TXN_CANCELLED' ||
+    errorType === 'OPERATION_CANCELLED'
+  ) {
+    return isMobile
+      ? 'Signature cancelled in Pera Wallet. Open the app again and approve the request to continue.'
+      : 'Signature cancelled in Pera Wallet. Scan the QR code again and approve on your phone.';
+  }
+
+  if (errorType === 'SESSION_CONNECT') {
+    return isMobile
+      ? 'Could not open Pera Wallet on this phone. Make sure the app is installed and try again.'
+      : 'Could not open the Pera QR flow. If the modal does not appear, allow pop-ups and try again.';
+  }
+
   if (message.toLowerCase().includes('cancel')) {
-    return 'Signature rejected. Please try again.';
+    return isMobile
+      ? 'Signature rejected in Pera Wallet. Open the app again and try once more.'
+      : 'Signature rejected in Pera Wallet. Scan the QR code again and approve on your phone.';
   }
 
   return fallback;
+}
+
+function getPeraIdleHint(isMobile) {
+  return isMobile
+    ? 'On mobile, SentinelX will open Pera Wallet so you can approve the connection and signature.'
+    : 'On desktop, a Pera QR code will appear. Scan it with Pera Wallet on your phone to continue.';
+}
+
+function getPeraConnectHint(isMobile) {
+  return isMobile
+    ? 'Opening Pera Wallet on this phone. Approve the connection to continue.'
+    : 'The Pera QR modal is opening. Scan the QR code with Pera Wallet on your phone.';
+}
+
+function getPeraSignHint(isMobile) {
+  return isMobile
+    ? 'Approve the SentinelX sign-in request inside Pera Wallet to finish logging in.'
+    : 'Connection approved. Confirm the SentinelX sign-in request in Pera Wallet on your phone.';
+}
+
+function getPeraStepUpHint(isMobile) {
+  return isMobile
+    ? 'Pera Wallet will open on this phone for your verification signature.'
+    : 'If a Pera QR modal appears, scan it with your phone and approve the verification request.';
 }
 
 export default function LoginPage() {
@@ -106,8 +157,10 @@ export default function LoginPage() {
   const [authResult, setAuthResult] = useState(null);
   const [stepUpState, setStepUpState] = useState(null);
   const [stepUpLoading, setStepUpLoading] = useState(false);
+  const [walletStatus, setWalletStatus] = useState('');
   const { setAuth, setEnforcement, addNotification } = useStore();
   const navigate = useNavigate();
+  const isMobile = isMobilePeraFlow();
 
   const finalizeLogin = (data, enforcementOverride) => {
     setAuth(data.wallet_address, data.token, data.risk_level, data.risk_score);
@@ -127,6 +180,7 @@ export default function LoginPage() {
 
     setStepUpLoading(true);
     setError('');
+    setWalletStatus(getPeraStepUpHint(isMobile));
 
     try {
       const challengeRes = await authAPI.challenge({
@@ -155,13 +209,23 @@ export default function LoginPage() {
         finalizeLogin(stepUpState.pendingAuth, verifyRes.data.enforcement);
       }
     } catch (err) {
-      setError(getErrorMessage(err, 'Step-up verification failed. Try again or continue with restricted access.'));
+      setError(
+        getErrorMessage(
+          err,
+          isMobile
+            ? 'Step-up verification failed. Open Pera Wallet on this phone and try again.'
+            : 'Step-up verification failed. Reopen the Pera QR flow and approve the request on your phone.',
+          isMobile,
+        ),
+      );
+    } finally {
+      setWalletStatus('');
+      setStepUpLoading(false);
     }
-
-    setStepUpLoading(false);
   };
 
   const skipStepUp = () => {
+    setWalletStatus('');
     addNotification({
       type: 'warning',
       title: 'Step-Up Skipped',
@@ -174,6 +238,7 @@ export default function LoginPage() {
     if (data.success) {
       if (data.step_up_required) {
         setAuthResult(data);
+        setWalletStatus('');
         setStepUpState({
           mode: stepUpMode,
           signerWallet,
@@ -188,6 +253,7 @@ export default function LoginPage() {
         message: data.message,
       });
       setAuthResult(data);
+      setWalletStatus('');
       finalizeLogin(data);
       return;
     }
@@ -206,9 +272,11 @@ export default function LoginPage() {
     setError('');
     setAuthResult(null);
     setStepUpState(null);
+    setWalletStatus(getPeraConnectHint(isMobile));
 
     try {
       const wallet = await connectPeraWallet();
+      setWalletStatus(getPeraSignHint(isMobile));
       const nonceRes = await authAPI.getNonce();
       const issuedAt = new Date().toISOString();
       const message = buildSignInMessage({
@@ -232,12 +300,16 @@ export default function LoginPage() {
       setError(
         getErrorMessage(
           err,
-          'Unable to complete Pera Wallet sign-in. Make sure Pera Wallet is installed and unlocked.',
+          isMobile
+            ? 'Unable to complete Pera Wallet sign-in. Open the Pera app on this phone and try again.'
+            : 'Unable to complete Pera Wallet sign-in. Reopen the QR modal, scan it with Pera Wallet on your phone, and try again.',
+          isMobile,
         ),
       );
+    } finally {
+      setWalletStatus('');
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const handleDemoLogin = async () => {
@@ -245,6 +317,7 @@ export default function LoginPage() {
     setError('');
     setAuthResult(null);
     setStepUpState(null);
+    setWalletStatus('');
 
     try {
       const nonceRes = await authAPI.getNonce();
@@ -260,10 +333,16 @@ export default function LoginPage() {
 
       handleAuthResponse(verifyRes.data, 'demo', DEMO_WALLET);
     } catch (err) {
-      setError(getErrorMessage(err, 'Backend not reachable. Please start the FastAPI server first.'));
+      setError(
+        getErrorMessage(
+          err,
+          'Backend not reachable. Please start the FastAPI server first.',
+          isMobile,
+        ),
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const features = [
@@ -343,7 +422,9 @@ export default function LoginPage() {
             </div>
 
             <p className="mt-4 text-center text-xs text-gray-500">
-              Completing verification will boost your trust score by +20 points
+              {stepUpState.mode === 'demo'
+                ? 'Completing verification will boost your trust score by +20 points'
+                : getPeraStepUpHint(isMobile)}
             </p>
           </div>
         </div>
@@ -360,6 +441,15 @@ export default function LoginPage() {
         <div className="landing-signin-content">
           <h1 className="landing-title">Sign in to SentinelX</h1>
           <p className="landing-subtitle">Protect sessions with Algorand-native wallet identity</p>
+
+          <div className="mb-4 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+            <p className="text-sm text-cyan-100">{walletStatus || getPeraIdleHint(isMobile)}</p>
+            {!isMobile && !walletStatus && (
+              <p className="mt-1 text-xs text-gray-400">
+                If the Pera modal does not appear, allow pop-ups in your browser and try again.
+              </p>
+            )}
+          </div>
 
           {error && !stepUpState && <div className="landing-error">{error}</div>}
 
@@ -473,7 +563,9 @@ export default function LoginPage() {
           </div>
 
           <p className="landing-footer-text">
-            SentinelX uses Algorand ed25519 signatures via Pera Wallet for secure authentication.
+            {isMobile
+              ? 'SentinelX will open Pera Wallet on this phone for secure authentication.'
+              : 'Desktop sign-in uses a Pera QR code that you scan with Pera Wallet on your phone.'}
             <br />
             No passwords. No emails. Just your wallet approval.
           </p>
