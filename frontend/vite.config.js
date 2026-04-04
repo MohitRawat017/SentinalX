@@ -11,10 +11,6 @@ export default defineConfig({
             return;
           }
 
-          if (id.includes('@perawallet') || id.includes('@walletconnect') || id.includes('bowser')) {
-            return 'algorand-wallet';
-          }
-
           if (id.includes('react-router')) {
             return 'router';
           }

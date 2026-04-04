@@ -21,7 +21,14 @@ const api = axios.create({
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('sentinelx_token');
+  let token = null;
+
+  try {
+    token = sessionStorage.getItem('sentinelx_token');
+  } catch {
+    token = null;
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

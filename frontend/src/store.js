@@ -1,10 +1,34 @@
 import { create } from 'zustand';
 
+function safeSessionGet(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSessionSet(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures so the app can still render.
+  }
+}
+
+function safeSessionRemove(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures so logout still clears in-memory state.
+  }
+}
+
 const useStore = create((set, get) => ({
   // ─── Auth State ───────────────────────────────────────────────
-  wallet: sessionStorage.getItem('sentinelx_wallet') || null,
-  token: sessionStorage.getItem('sentinelx_token') || null,
-  isAuthenticated: !!sessionStorage.getItem('sentinelx_token'),
+  wallet: safeSessionGet('sentinelx_wallet') || null,
+  token: safeSessionGet('sentinelx_token') || null,
+  isAuthenticated: !!safeSessionGet('sentinelx_token'),
   riskLevel: null,
   riskScore: null,
 
@@ -14,8 +38,8 @@ const useStore = create((set, get) => ({
   lockedUntil: null,
 
   setAuth: (wallet, token, riskLevel, riskScore) => {
-    sessionStorage.setItem('sentinelx_token', token);
-    sessionStorage.setItem('sentinelx_wallet', wallet);
+    safeSessionSet('sentinelx_token', token);
+    safeSessionSet('sentinelx_wallet', wallet);
     set({
       wallet,
       token,
@@ -35,8 +59,8 @@ const useStore = create((set, get) => ({
   },
 
   logout: () => {
-    sessionStorage.removeItem('sentinelx_token');
-    sessionStorage.removeItem('sentinelx_wallet');
+    safeSessionRemove('sentinelx_token');
+    safeSessionRemove('sentinelx_wallet');
     set({
       wallet: null,
       token: null,
