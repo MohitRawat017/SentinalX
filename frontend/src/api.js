@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+const isProductionApiConfigured = Boolean(configuredApiUrl);
 const isLoopbackUrl = /^(https?:\/\/)?(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(\/|$)/i.test(
   configuredApiUrl || '',
 );
@@ -19,6 +20,23 @@ const api = axios.create({
   },
 });
 
+function buildMissingApiUrlMessage() {
+  return 'Production frontend is missing VITE_API_URL. Point it to the FastAPI backend, rebuild, and redeploy.';
+}
+
+function isLikelyFrontendRewriteResponse(response) {
+  if (!response || import.meta.env.DEV || isProductionApiConfigured) {
+    return false;
+  }
+
+  const contentType =
+    response.headers?.['content-type'] ||
+    response.headers?.['Content-Type'] ||
+    '';
+
+  return typeof response.data === 'string' && contentType.includes('text/html');
+}
+
 // Add auth token to requests
 api.interceptors.request.use((config) => {
   let token = null;
@@ -36,10 +54,28 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isLikelyFrontendRewriteResponse(response)) {
+      const configError = new Error(buildMissingApiUrlMessage());
+      configError.data = { type: 'API_CONFIG' };
+      configError.response = response;
+      throw configError;
+    }
+
+    return response;
+  },
   (error) => {
     if (error.code === 'ECONNABORTED') {
       error.message = 'The SentinelX backend did not respond in time. Check your API URL or backend status.';
+    }
+
+    if (
+      !import.meta.env.DEV &&
+      !isProductionApiConfigured &&
+      (error.response?.status === 404 || isLikelyFrontendRewriteResponse(error.response))
+    ) {
+      error.message = buildMissingApiUrlMessage();
+      error.data = { type: 'API_CONFIG' };
     }
 
     return Promise.reject(error);

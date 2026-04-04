@@ -96,6 +96,10 @@ function getErrorMessage(err, fallback, isMobile) {
   const errorType = err?.data?.type;
   const message = err?.message || '';
 
+  if (errorType === 'API_CONFIG') {
+    return message;
+  }
+
   if (errorType === 'CONNECT_MODAL_CLOSED' || errorType === 'CONNECT_CANCELLED') {
     return isMobile
       ? 'Pera Wallet connection was cancelled. Open the app again and approve to continue.'
@@ -122,6 +126,10 @@ function getErrorMessage(err, fallback, isMobile) {
     return isMobile
       ? 'Signature rejected in Pera Wallet. Open the app again and try once more.'
       : 'Signature rejected in Pera Wallet. Scan the QR code again and approve on your phone.';
+  }
+
+  if (message && !/^Request failed with status code \d+$/i.test(message) && message !== 'Network Error') {
+    return message;
   }
 
   return fallback;

@@ -111,6 +111,31 @@ async function getPeraWallet() {
   return peraWalletPromise;
 }
 
+async function getConnectedPeraAccounts(peraWallet) {
+  try {
+    const accounts = await peraWallet.reconnectSession();
+    return Array.isArray(accounts) ? accounts : [];
+  } catch {
+    return [];
+  }
+}
+
+function getMatchingAccount(accounts, expectedAddress) {
+  if (!accounts?.length) {
+    return null;
+  }
+
+  if (!expectedAddress) {
+    return accounts[0];
+  }
+
+  const normalizedExpected = expectedAddress.trim().toUpperCase();
+
+  return (
+    accounts.find((account) => account.trim().toUpperCase() === normalizedExpected) || null
+  );
+}
+
 function toUint8Array(value) {
   if (value instanceof Uint8Array) {
     return value;
@@ -197,13 +222,7 @@ async function resetUnsupportedDesktopSession(peraWallet, accounts) {
 
 export async function connectPeraWallet(expectedAddress) {
   const peraWallet = await getPeraWallet();
-  let accounts = [];
-
-  try {
-    accounts = await peraWallet.reconnectSession();
-  } catch {
-    accounts = [];
-  }
+  let accounts = await getConnectedPeraAccounts(peraWallet);
 
   accounts = await resetUnsupportedDesktopSession(peraWallet, accounts);
 
@@ -221,21 +240,7 @@ export async function connectPeraWallet(expectedAddress) {
     throw new Error('No Algorand account connected in Pera Wallet.');
   }
 
-  if (!isMobilePeraFlow() && peraWallet.platform === 'web') {
-    await peraWallet.disconnect();
-    throw new Error(
-      'Desktop sign-in must be approved with Pera Wallet on your phone. Scan the QR code in the Pera modal to continue.',
-    );
-  }
-
-  if (!expectedAddress) {
-    return accounts[0];
-  }
-
-  const normalizedExpected = expectedAddress.trim().toUpperCase();
-  const matchingAccount = accounts.find(
-    (account) => account.trim().toUpperCase() === normalizedExpected,
-  );
+  const matchingAccount = getMatchingAccount(accounts, expectedAddress);
 
   if (!matchingAccount) {
     throw new Error('Please connect the same Algorand account in Pera Wallet to continue.');
@@ -246,7 +251,17 @@ export async function connectPeraWallet(expectedAddress) {
 
 export async function signMessageWithPera(message, signerAddress) {
   const peraWallet = await getPeraWallet();
-  const activeAddress = await connectPeraWallet(signerAddress);
+  const connectedAccounts = await getConnectedPeraAccounts(peraWallet);
+  const activeAddress =
+    getMatchingAccount(connectedAccounts, signerAddress) ||
+    (connectedAccounts?.length
+      ? null
+      : await connectPeraWallet(signerAddress));
+
+  if (!activeAddress) {
+    throw new Error('Please connect the same Algorand account in Pera Wallet to continue.');
+  }
+
   const encodedMessage = new TextEncoder().encode(message);
   const signedPayload = await peraWallet.signData(
     [
