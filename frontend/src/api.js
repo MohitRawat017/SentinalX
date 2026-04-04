@@ -1,9 +1,19 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+const isLoopbackUrl = /^(https?:\/\/)?(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(\/|$)/i.test(
+  configuredApiUrl || '',
+);
+const API_BASE =
+  configuredApiUrl && (!import.meta.env.PROD || !isLoopbackUrl)
+    ? configuredApiUrl.replace(/\/+$/, '')
+    : import.meta.env.PROD
+      ? ''
+      : 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE,
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -17,6 +27,17 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNABORTED') {
+      error.message = 'The SentinelX backend did not respond in time. Check your API URL or backend status.';
+    }
+
+    return Promise.reject(error);
+  },
+);
 
 // ─── Auth ───────────────────────────────────────────────────────
 export const authAPI = {

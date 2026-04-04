@@ -1,15 +1,23 @@
-import { PeraWalletConnect } from '@perawallet/connect';
-
-const peraWallet = new PeraWalletConnect();
 const DEFAULT_EXPLORER_BASE =
   import.meta.env.VITE_ALGO_EXPLORER_TX_BASE ||
   'https://testnet.explorer.perawallet.app/tx/';
+
+let peraWalletPromise = null;
 
 export const DEMO_WALLET =
   'SAHBJDRHHRR72JHTWSXZR5VHQQUVC7S757TJZI656FWSDO3TZZWV3IGJV4';
 export const DEMO_LOGIN_SIGNATURE = `0x${'a'.repeat(130)}`;
 export const DEMO_STEP_UP_SIGNATURE = `0x${'b'.repeat(130)}`;
-export { peraWallet };
+
+async function getPeraWallet() {
+  if (!peraWalletPromise) {
+    peraWalletPromise = import('@perawallet/connect').then(
+      ({ PeraWalletConnect }) => new PeraWalletConnect(),
+    );
+  }
+
+  return peraWalletPromise;
+}
 
 function toUint8Array(value) {
   if (value instanceof Uint8Array) {
@@ -87,6 +95,7 @@ export function buildSignInMessage({ walletAddress, nonce, issuedAt, origin }) {
 }
 
 export async function connectPeraWallet(expectedAddress) {
+  const peraWallet = await getPeraWallet();
   let accounts = [];
 
   try {
@@ -120,6 +129,7 @@ export async function connectPeraWallet(expectedAddress) {
 }
 
 export async function signMessageWithPera(message, signerAddress) {
+  const peraWallet = await getPeraWallet();
   const activeAddress = await connectPeraWallet(signerAddress);
   const encodedMessage = new TextEncoder().encode(message);
   const signedPayload = await peraWallet.signData(
