@@ -224,6 +224,8 @@ npm run dev
 ```
 
 > 📍 Dashboard opens at **http://localhost:5174**
+>
+> For deployed frontend builds, set `VITE_API_URL` to your FastAPI backend before running `npm run build` or deploying to Vercel.
 
 ### 4️⃣ Smart Contracts (Optional)
 

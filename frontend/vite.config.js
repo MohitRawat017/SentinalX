@@ -1,8 +1,26 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const browserGlobal = 'globalThis'
+
 export default defineConfig({
+  define: {
+    global: browserGlobal,
+  },
   plugins: [react()],
+  resolve: {
+    alias: {
+      buffer: 'buffer/',
+    },
+  },
+  optimizeDeps: {
+    include: ['@perawallet/connect', 'buffer'],
+    esbuildOptions: {
+      define: {
+        global: browserGlobal,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

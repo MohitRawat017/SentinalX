@@ -22,6 +22,27 @@ import {
 import useStore from '../store';
 
 
+function logWalletError(context, err) {
+  console.error(`[SentinelX] ${context}`, err);
+
+  if (err?.data?.detail) {
+    console.error('[SentinelX] Wallet error detail:', err.data.detail);
+  }
+}
+
+function isWalletCompatibilityError(message) {
+  const normalizedMessage = (message || '').toLowerCase();
+
+  return [
+    'global is not defined',
+    'buffer is not defined',
+    'process is not defined',
+    'module is not defined',
+    'exports is not defined',
+    'failed to fetch dynamically imported module',
+  ].some((pattern) => normalizedMessage.includes(pattern));
+}
+
 async function getGeolocation() {
   let coords = { lat: null, lng: null };
   let locationInfo = { country: null, city: null };
@@ -98,6 +119,12 @@ function getErrorMessage(err, fallback, isMobile) {
 
   if (errorType === 'API_CONFIG') {
     return message;
+  }
+
+  if (errorType === 'WALLET_INIT' || isWalletCompatibilityError(message)) {
+    return isMobile
+      ? 'Pera Wallet could not be initialized on this phone. Refresh and try again.'
+      : 'Pera Wallet could not be initialized in this browser. Refresh the page and try again.';
   }
 
   if (errorType === 'CONNECT_MODAL_CLOSED' || errorType === 'CONNECT_CANCELLED') {
@@ -217,6 +244,7 @@ export default function LoginPage() {
         finalizeLogin(stepUpState.pendingAuth, verifyRes.data.enforcement);
       }
     } catch (err) {
+      logWalletError('Pera step-up verification failed.', err);
       setError(
         getErrorMessage(
           err,
@@ -305,6 +333,7 @@ export default function LoginPage() {
 
       handleAuthResponse(verifyRes.data, 'pera', wallet);
     } catch (err) {
+      logWalletError('Pera sign-in failed.', err);
       setError(
         getErrorMessage(
           err,
