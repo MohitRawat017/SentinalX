@@ -1,211 +1,267 @@
-"""
-SentinelX Merkle Batching Service
-Collects event hashes, builds Merkle trees, posts roots on-chain
-"""
+from __future__ import annotations
+
 import asyncio
 import hashlib
-import json
-import math
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Optional
+
+from sqlalchemy import desc, select
 
 from app.config import settings
+from app.database import AsyncSessionLocal
+from app.models.models import AuditBatch, GuardEvent, LoginEvent, TransactionEvent
+from app.services.blockchain import get_explorer_tx_url, store_merkle_batch
 
 
-def keccak256(data: bytes) -> str:
-    """Compute keccak256 hash (fallback to sha3_256 if pysha3 not available)"""
-    try:
-        import sha3
-        h = sha3.keccak_256()
-        h.update(data)
-        return "0x" + h.hexdigest()
-    except ImportError:
-        h = hashlib.sha256(data)
-        return "0x" + h.hexdigest()
+def _normalize_hash(value: str) -> str:
+    cleaned = (value or "").strip().lower().removeprefix("0x")
+    if len(cleaned) == 64 and all(ch in "0123456789abcdef" for ch in cleaned):
+        return cleaned
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
 
 
-class MerkleTree:
-    """Standard Merkle tree with keccak256 hashing"""
+def _hash_pair(left: str, right: str) -> str:
+    ordered = sorted((_normalize_hash(left), _normalize_hash(right)))
+    return hashlib.sha256("".join(ordered).encode("utf-8")).hexdigest()
 
-    def __init__(self, leaves: List[str]):
-        self.leaves = [self._to_bytes32(leaf) for leaf in leaves]
-        self.layers: List[List[str]] = []
-        self.root: str = ""
-        self._build()
 
-    def _to_bytes32(self, hex_str: str) -> str:
-        """Normalize a hex string to bytes32"""
-        if hex_str.startswith("0x"):
-            hex_str = hex_str[2:]
-        return hex_str.ljust(64, "0")[:64]
+def _build_levels(leaves: list[str]) -> list[list[str]]:
+    if not leaves:
+        return []
 
-    def _hash_pair(self, a: str, b: str) -> str:
-        """Hash two nodes together (sorted for consistency)"""
-        pair = sorted([a, b])
-        combined = bytes.fromhex(pair[0]) + bytes.fromhex(pair[1])
-        return keccak256(combined)[2:]  # strip 0x
+    levels = [[_normalize_hash(leaf) for leaf in leaves]]
+    while len(levels[-1]) > 1:
+        current = levels[-1]
+        next_level: list[str] = []
+        for index in range(0, len(current), 2):
+            left = current[index]
+            right = current[index + 1] if index + 1 < len(current) else current[index]
+            next_level.append(_hash_pair(left, right))
+        levels.append(next_level)
+    return levels
 
-    def _build(self):
-        """Build the Merkle tree from leaves up"""
-        if not self.leaves:
-            self.root = "0x" + "0" * 64
-            return
 
-        current_layer = self.leaves[:]
-        self.layers = [current_layer[:]]
+def get_merkle_root(leaves: list[str]) -> Optional[str]:
+    levels = _build_levels(leaves)
+    if not levels:
+        return None
+    return levels[-1][0]
 
-        while len(current_layer) > 1:
-            next_layer = []
-            for i in range(0, len(current_layer), 2):
-                if i + 1 < len(current_layer):
-                    next_layer.append(self._hash_pair(current_layer[i], current_layer[i + 1]))
-                else:
-                    next_layer.append(current_layer[i])
-            current_layer = next_layer
-            self.layers.append(current_layer[:])
 
-        self.root = "0x" + current_layer[0]
+def get_merkle_proof(leaves: list[str], index: int) -> list[str]:
+    levels = _build_levels(leaves)
+    if not levels or index < 0 or index >= len(levels[0]):
+        return []
 
-    def get_proof(self, leaf_index: int) -> List[str]:
-        """Get Merkle proof for a specific leaf"""
-        if leaf_index >= len(self.leaves):
-            return []
+    proof: list[str] = []
+    cursor = index
+    for level in levels[:-1]:
+        sibling_index = cursor + 1 if cursor % 2 == 0 else cursor - 1
+        if sibling_index >= len(level):
+            sibling_index = cursor
+        proof.append(level[sibling_index])
+        cursor //= 2
+    return proof
 
-        proof = []
-        index = leaf_index
 
-        for layer in self.layers[:-1]:
-            if index % 2 == 0:
-                # Right sibling
-                if index + 1 < len(layer):
-                    proof.append("0x" + layer[index + 1])
-            else:
-                # Left sibling
-                proof.append("0x" + layer[index - 1])
-            index = index // 2
-
-        return proof
-
-    def verify_proof(self, leaf: str, proof: List[str], root: str) -> bool:
-        """Verify a Merkle proof"""
-        current = self._to_bytes32(leaf)
-
-        for sibling in proof:
-            sibling_clean = self._to_bytes32(sibling)
-            current = self._hash_pair(current, sibling_clean)
-
-        return ("0x" + current) == root
+def verify_proof(event_hash: str, proof: list[str], merkle_root: str) -> bool:
+    current = _normalize_hash(event_hash)
+    for sibling in proof:
+        current = _hash_pair(current, sibling)
+    return current == _normalize_hash(merkle_root)
 
 
 class MerkleBatcher:
-    """Collects events and batches them into Merkle trees"""
+    _instance: Optional["MerkleBatcher"] = None
 
-    _instance = None
-
-    def __init__(self):
-        self.pending_events: List[Dict] = []
-        self.batches: List[Dict] = []
-        self.trees: Dict[str, MerkleTree] = {}
+    def __init__(self) -> None:
+        self.pending_events: list[dict[str, Any]] = []
+        self.batches: list[dict[str, Any]] = []
+        self._lock = asyncio.Lock()
+        self._initialized = False
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls) -> "MerkleBatcher":
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
-    def add_event(self, event_hash: str, event_type: str = "login", metadata: Optional[Dict] = None):
-        """Add an event hash to the pending batch"""
-        self.pending_events.append({
-            "event_hash": event_hash,
+    async def initialize(self) -> None:
+        if self._initialized:
+            return
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(AuditBatch).order_by(desc(AuditBatch.timestamp))
+            )
+            rows = list(result.scalars().all())
+            self.batches = [self._serialize_batch(row) for row in rows]
+
+            pending_rows = [row for row in rows if row.status != "confirmed" and row.event_hashes]
+
+        for row in reversed(pending_rows):
+            await self._submit_existing_batch(row.merkle_root)
+
+        self._initialized = True
+
+    def add_event(self, event_hash: str, event_type: str = "event", metadata: Optional[dict[str, Any]] = None) -> None:
+        item = {
+            "event_hash": _normalize_hash(event_hash),
             "event_type": event_type,
             "metadata": metadata or {},
-            "timestamp": datetime.utcnow().isoformat(),
-        })
-
-        # Auto-batch if threshold reached
-        if len(self.pending_events) >= settings.MERKLE_BATCH_SIZE:
-            return self.create_batch()
-        return None
-
-    def create_batch(self) -> Optional[Dict]:
-        """Create a Merkle batch from pending events"""
-        if not self.pending_events:
-            return None
-
-        event_hashes = [e["event_hash"] for e in self.pending_events]
-        tree = MerkleTree(event_hashes)
-
-        batch = {
-            "id": f"batch_{len(self.batches) + 1}",
-            "merkle_root": tree.root,
-            "event_count": len(event_hashes),
-            "event_hashes": event_hashes,
-            "events": self.pending_events[:],
-            "created_at": datetime.utcnow().isoformat(),
-            "tx_hash": None,
-            "status": "pending",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
+        self.pending_events.append(item)
 
-        self.trees[tree.root] = tree
-        self.batches.append(batch)
-        self.pending_events = []
+        if len(self.pending_events) >= settings.MERKLE_BATCH_SIZE:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.create_batch(force=True))
+            except RuntimeError:
+                pass
 
-        return batch
+    async def create_batch(self, force: bool = False) -> Optional[dict[str, Any]]:
+        async with self._lock:
+            if not self.pending_events:
+                return None
+            if not force and len(self.pending_events) < settings.MERKLE_BATCH_SIZE:
+                return None
 
-    def get_proof(self, merkle_root: str, event_hash: str) -> Optional[Dict]:
-        """Get Merkle proof for a specific event in a batch"""
-        tree = self.trees.get(merkle_root)
-        if not tree:
+            events = list(self.pending_events)
+            self.pending_events.clear()
+
+        event_hashes = [event["event_hash"] for event in events]
+        merkle_root = get_merkle_root(event_hashes)
+        if not merkle_root:
             return None
 
-        # Find the leaf index
-        normalized_hash = tree._to_bytes32(event_hash)
+        async with AsyncSessionLocal() as db:
+            batch = AuditBatch(
+                merkle_root=merkle_root,
+                event_count=len(event_hashes),
+                event_hashes=event_hashes,
+                status="pending",
+            )
+            db.add(batch)
+            await db.commit()
+            await db.refresh(batch)
+
+        batch_dict = self._serialize_batch(batch)
+        self.batches.insert(0, batch_dict)
+        await self._sync_event_batch_references(event_hashes, merkle_root, None)
+        await self._submit_existing_batch(merkle_root)
+        return self.get_batch(merkle_root)
+
+    async def run_background(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(settings.MERKLE_BATCH_INTERVAL_SECONDS)
+                if self.pending_events:
+                    await self.create_batch(force=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - background safety
+                print(f"MerkleBatcher error: {exc}")
+                await asyncio.sleep(5)
+
+    def get_batch(self, merkle_root: str) -> Optional[dict[str, Any]]:
+        normalized = _normalize_hash(merkle_root)
+        return next((batch for batch in self.batches if batch["merkle_root"] == normalized), None)
+
+    def get_proof(self, merkle_root: str, event_hash: str) -> Optional[dict[str, Any]]:
+        batch = self.get_batch(merkle_root)
+        if not batch:
+            return None
+
+        normalized_event_hash = _normalize_hash(event_hash)
         try:
-            leaf_index = tree.leaves.index(normalized_hash)
+            index = [_normalize_hash(item) for item in batch["event_hashes"]].index(normalized_event_hash)
         except ValueError:
             return None
 
-        proof = tree.get_proof(leaf_index)
-        is_valid = tree.verify_proof(event_hash, proof, merkle_root)
-
+        proof = get_merkle_proof(batch["event_hashes"], index)
+        explorer_url = get_explorer_tx_url(batch.get("tx_hash"))
         return {
-            "event_hash": event_hash,
-            "merkle_root": merkle_root,
+            "batch_id": batch["id"],
+            "event_hash": normalized_event_hash,
+            "merkle_root": batch["merkle_root"],
             "proof": proof,
-            "leaf_index": leaf_index,
-            "is_valid": is_valid,
+            "tx_hash": batch.get("tx_hash"),
+            "explorer_url": explorer_url,
+            "etherscan_url": explorer_url,
         }
 
-    def verify_inclusion(self, event_hash: str, proof: List[str], merkle_root: str) -> bool:
-        """Verify that an event is included in a batch"""
-        tree = MerkleTree([])  # Dummy tree for utility methods
-        return tree.verify_proof(event_hash, proof, merkle_root)
+    def verify_inclusion(self, event_hash: str, proof: list[str], merkle_root: str) -> bool:
+        return verify_proof(event_hash, proof, merkle_root)
 
-    def get_stats(self) -> Dict:
-        """Get batching statistics"""
+    def get_stats(self) -> dict[str, Any]:
         return {
-            "pending_events": len(self.pending_events),
             "total_batches": len(self.batches),
-            "total_events_batched": sum(b["event_count"] for b in self.batches),
-            "batches": [
-                {
-                    "id": b["id"],
-                    "merkle_root": b["merkle_root"],
-                    "event_count": b["event_count"],
-                    "event_hashes": b.get("event_hashes", []),
-                    "status": b["status"],
-                    "tx_hash": b["tx_hash"],
-                    "created_at": b["created_at"],
-                }
-                for b in self.batches[-10:]  # Last 10 batches
-            ],
+            "pending_events": len(self.pending_events),
+            "total_events_batched": sum(batch["event_count"] for batch in self.batches),
+            "batches": self.batches,
         }
 
-    async def run_background(self):
-        """Background task: periodically create batches"""
-        while True:
-            await asyncio.sleep(settings.MERKLE_BATCH_INTERVAL_SECONDS)
-            if self.pending_events:
-                batch = self.create_batch()
-                if batch:
-                    print(f"🌲 Merkle batch created: {batch['merkle_root'][:16]}... ({batch['event_count']} events)")
+    async def _submit_existing_batch(self, merkle_root: str) -> None:
+        batch = self.get_batch(merkle_root)
+        if not batch or batch.get("status") == "confirmed":
+            return
+
+        submission = await store_merkle_batch(merkle_root)
+        if submission is None:
+            return
+
+        tx_id = submission["tx_id"]
+        confirmed_round = submission.get("confirmed_round")
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(AuditBatch).where(AuditBatch.merkle_root == merkle_root)
+            )
+            batch_row = result.scalar_one_or_none()
+            if batch_row is None:
+                return
+
+            batch_row.tx_hash = tx_id
+            batch_row.block_number = confirmed_round
+            batch_row.status = "confirmed"
+            await db.commit()
+
+        await self._sync_event_batch_references(batch["event_hashes"], merkle_root, tx_id)
+        cached = self.get_batch(merkle_root)
+        if cached:
+            cached["tx_hash"] = tx_id
+            cached["block_number"] = confirmed_round
+            cached["status"] = "confirmed"
+            cached["explorer_url"] = get_explorer_tx_url(tx_id)
+
+    async def _sync_event_batch_references(self, event_hashes: list[str], merkle_root: str, tx_hash: Optional[str]) -> None:
+        if not event_hashes:
+            return
+
+        async with AsyncSessionLocal() as db:
+            normalized_hashes = [_normalize_hash(value) for value in event_hashes]
+            for model in (LoginEvent, GuardEvent, TransactionEvent):
+                result = await db.execute(
+                    select(model).where(model.event_hash.in_(normalized_hashes))
+                )
+                for row in result.scalars().all():
+                    row.merkle_root = merkle_root
+                    if tx_hash:
+                        row.tx_hash = tx_hash
+            await db.commit()
+
+    @staticmethod
+    def _serialize_batch(batch: AuditBatch) -> dict[str, Any]:
+        tx_hash = batch.tx_hash
+        return {
+            "id": batch.id,
+            "merkle_root": _normalize_hash(batch.merkle_root),
+            "event_count": batch.event_count or 0,
+            "event_hashes": batch.event_hashes or [],
+            "tx_hash": tx_hash,
+            "block_number": batch.block_number,
+            "status": batch.status or "pending",
+            "created_at": (batch.timestamp or datetime.utcnow()).isoformat() + "Z",
+            "explorer_url": get_explorer_tx_url(tx_hash),
+        }

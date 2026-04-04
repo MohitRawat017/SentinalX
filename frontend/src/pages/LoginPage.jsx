@@ -1,50 +1,65 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import useStore from '../store';
-import { authAPI } from '../api';
-import { HiShieldCheck, HiBolt, HiCpuChip, HiLockClosed, HiCommandLine, HiExclamationTriangle, HiFingerPrint } from 'react-icons/hi2';
+import {
+  HiBolt,
+  HiCommandLine,
+  HiExclamationTriangle,
+  HiFingerPrint,
+  HiLockClosed,
+  HiShieldCheck,
+} from 'react-icons/hi2';
 
-// ─── Geolocation utility ────────────────────────────────────────────
-// Priority: Browser Geolocation API (GPS/WiFi) → IP-based fallback
+import { authAPI } from '../api';
+import {
+  buildSignInMessage,
+  connectPeraWallet,
+  DEMO_LOGIN_SIGNATURE,
+  DEMO_STEP_UP_SIGNATURE,
+  DEMO_WALLET,
+  signMessageWithPera,
+} from '../api/blockchain';
+import useStore from '../store';
+
+
 async function getGeolocation() {
   let coords = { lat: null, lng: null };
   let locationInfo = { country: null, city: null };
 
-  // 1. Try Browser Geolocation API first (most accurate - uses GPS/WiFi)
   if (navigator.geolocation) {
     try {
       const pos = await new Promise((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           timeout: 10000,
-          enableHighAccuracy: true, // Use GPS if available
-          maximumAge: 60000, // Cache for 1 minute
+          enableHighAccuracy: true,
+          maximumAge: 60000,
         });
       });
       coords.lat = pos.coords.latitude;
       coords.lng = pos.coords.longitude;
 
-      // Reverse geocode to get city/country from coordinates
       try {
         const geoRes = await fetch(
           `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json`,
-          { headers: { 'User-Agent': 'SentinelX-App' } }
+          { headers: { 'User-Agent': 'SentinelX-App' } },
         );
         const geoData = await geoRes.json();
-        locationInfo.city = geoData.address?.city || geoData.address?.town || geoData.address?.village || geoData.address?.state_district;
+        locationInfo.city =
+          geoData.address?.city ||
+          geoData.address?.town ||
+          geoData.address?.village ||
+          geoData.address?.state_district;
         locationInfo.country = geoData.address?.country;
-        // Add state for Indian addresses
         if (geoData.address?.state) {
           locationInfo.city = `${locationInfo.city}, ${geoData.address.state}`;
         }
       } catch {
-        // Reverse geocoding failed, continue with coords only
+        // Reverse geocoding is optional.
       }
     } catch {
-      // Browser geolocation denied or failed, try IP-based
+      // Browser geolocation is optional.
     }
   }
 
-  // 2. Fallback: IP-based geolocation (less accurate)
   if (!coords.lat || !coords.lng) {
     try {
       const controller = new AbortController();
@@ -60,7 +75,7 @@ async function getGeolocation() {
         locationInfo.city = `${data.city}, ${data.region}`;
       }
     } catch {
-      // All geolocation methods failed
+      // IP geolocation is optional.
     }
   }
 
@@ -72,16 +87,28 @@ async function getGeolocation() {
   };
 }
 
+function getErrorMessage(err, fallback) {
+  if (err?.response?.data?.detail) {
+    return err.response.data.detail;
+  }
+
+  const message = err?.message || '';
+  if (message.toLowerCase().includes('cancel')) {
+    return 'Signature rejected. Please try again.';
+  }
+
+  return fallback;
+}
+
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [authResult, setAuthResult] = useState(null);
-  const [stepUpState, setStepUpState] = useState(null); // { wallet, hasMetaMask, pendingAuth }
+  const [stepUpState, setStepUpState] = useState(null);
   const [stepUpLoading, setStepUpLoading] = useState(false);
   const { setAuth, setEnforcement, addNotification } = useStore();
   const navigate = useNavigate();
 
-  // Finalize login: sets auth in store and navigates to dashboard
   const finalizeLogin = (data, enforcementOverride) => {
     setAuth(data.wallet_address, data.token, data.risk_level, data.risk_score);
     const enforcement = enforcementOverride || {
@@ -94,33 +121,27 @@ export default function LoginPage() {
   };
 
   const handleStepUp = async () => {
-    if (!stepUpState) return;
+    if (!stepUpState) {
+      return;
+    }
+
     setStepUpLoading(true);
     setError('');
 
     try {
-      // 1. Request a step-up challenge from backend
       const challengeRes = await authAPI.challenge({
-        wallet_address: stepUpState.wallet,
+        wallet_address: stepUpState.signerWallet,
         challenge_type: 're-sign',
       });
       const { nonce, message } = challengeRes.data;
 
-      let signature;
-      if (stepUpState.hasMetaMask) {
-        // 2. MetaMask re-sign
-        signature = await window.ethereum.request({
-          method: 'personal_sign',
-          params: [message, stepUpState.wallet],
-        });
-      } else {
-        // Demo mode: simulated signature
-        signature = '0x' + 'b'.repeat(130);
-      }
+      const signature =
+        stepUpState.mode === 'demo'
+          ? DEMO_STEP_UP_SIGNATURE
+          : await signMessageWithPera(message, stepUpState.signerWallet);
 
-      // 3. Verify with backend
       const verifyRes = await authAPI.stepUpVerify({
-        wallet_address: stepUpState.wallet,
+        wallet_address: stepUpState.signerWallet,
         signature,
         nonce,
       });
@@ -129,18 +150,12 @@ export default function LoginPage() {
         addNotification({
           type: 'success',
           title: 'Verification Complete',
-          message: `Trust score boosted: ${verifyRes.data.enforcement.previous_score} → ${verifyRes.data.enforcement.trust_score}`,
+          message: `Trust score boosted: ${verifyRes.data.enforcement.previous_score} -> ${verifyRes.data.enforcement.trust_score}`,
         });
-        // NOW finalize login with boosted enforcement
         finalizeLogin(stepUpState.pendingAuth, verifyRes.data.enforcement);
       }
     } catch (err) {
-      console.error('Step-up error:', err);
-      if (err.code === 4001) {
-        setError('Signature rejected. You can skip verification and continue with restricted access.');
-      } else {
-        setError(err.response?.data?.detail || 'Step-up verification failed. Try again or skip.');
-      }
+      setError(getErrorMessage(err, 'Step-up verification failed. Try again or continue with restricted access.'));
     }
 
     setStepUpLoading(false);
@@ -152,69 +167,74 @@ export default function LoginPage() {
       title: 'Step-Up Skipped',
       message: 'Some sensitive actions may require additional verification.',
     });
-    // Finalize login with original enforcement (step_up_required stays)
     finalizeLogin(stepUpState.pendingAuth);
+  };
+
+  const handleAuthResponse = (data, stepUpMode, signerWallet) => {
+    if (data.success) {
+      if (data.step_up_required) {
+        setAuthResult(data);
+        setStepUpState({
+          mode: stepUpMode,
+          signerWallet,
+          pendingAuth: data,
+        });
+        return;
+      }
+
+      addNotification({
+        type: data.risk_level === 'high' ? 'warning' : 'success',
+        title: stepUpMode === 'demo' ? 'Demo Login Successful' : 'Authenticated',
+        message: data.message,
+      });
+      setAuthResult(data);
+      finalizeLogin(data);
+      return;
+    }
+
+    if (data.security_status === 'locked') {
+      setError(`Account locked: ${data.message}`);
+      setAuthResult(data);
+      return;
+    }
+
+    setError(data.message || 'Authentication failed.');
   };
 
   const handleWalletLogin = async () => {
     setLoading(true);
     setError('');
+    setAuthResult(null);
+    setStepUpState(null);
 
     try {
-      if (typeof window.ethereum !== 'undefined') {
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        const wallet = accounts[0];
+      const wallet = await connectPeraWallet();
+      const nonceRes = await authAPI.getNonce();
+      const issuedAt = new Date().toISOString();
+      const message = buildSignInMessage({
+        walletAddress: wallet,
+        nonce: nonceRes.data.nonce,
+        issuedAt,
+        origin: window.location.origin,
+      });
+      const signature = await signMessageWithPera(message, wallet);
 
-        const nonceRes = await authAPI.getNonce();
-        const nonce = nonceRes.data.nonce;
+      const verifyRes = await authAPI.verify({
+        message,
+        signature,
+        wallet_address: wallet,
+        user_agent: navigator.userAgent,
+        ...(await getGeolocation()),
+      });
 
-        const message = `SentinelX wants you to sign in with your Ethereum account:\n${wallet}\n\nSign in to SentinelX Security Platform\n\nURI: ${window.location.origin}\nVersion: 1\nChain ID: 11155111\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
-
-        const signature = await window.ethereum.request({
-          method: 'personal_sign',
-          params: [message, wallet],
-        });
-
-        const verifyRes = await authAPI.verify({
-          message,
-          signature,
-          wallet_address: wallet,
-          user_agent: navigator.userAgent,
-          ...(await getGeolocation()),
-        });
-
-        if (verifyRes.data.success) {
-          if (verifyRes.data.step_up_required) {
-            // DON'T authenticate yet — show step-up challenge first
-            setAuthResult(verifyRes.data);
-            setStepUpState({ wallet, hasMetaMask: true, pendingAuth: verifyRes.data });
-          } else {
-            addNotification({
-              type: verifyRes.data.risk_level === 'high' ? 'warning' : 'success',
-              title: 'Authenticated',
-              message: verifyRes.data.message,
-            });
-            setAuthResult(verifyRes.data);
-            finalizeLogin(verifyRes.data);
-          }
-        } else {
-          if (verifyRes.data.security_status === 'locked') {
-            setError(`Account locked: ${verifyRes.data.message}`);
-            setAuthResult(verifyRes.data);
-          } else {
-            setError(verifyRes.data.message);
-          }
-        }
-      } else {
-        await handleDemoLogin();
-      }
+      handleAuthResponse(verifyRes.data, 'pera', wallet);
     } catch (err) {
-      console.error('Login error:', err);
-      if (err.code === 4001) {
-        setError('Signature rejected. Please try again.');
-      } else {
-        await handleDemoLogin();
-      }
+      setError(
+        getErrorMessage(
+          err,
+          'Unable to complete Pera Wallet sign-in. Make sure Pera Wallet is installed and unlocked.',
+        ),
+      );
     }
 
     setLoading(false);
@@ -222,61 +242,44 @@ export default function LoginPage() {
 
   const handleDemoLogin = async () => {
     setLoading(true);
-    try {
-      const demoWallet = '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28';
-      const nonceRes = await authAPI.getNonce();
+    setError('');
+    setAuthResult(null);
+    setStepUpState(null);
 
-      const message = `SentinelX Demo Login\nWallet: ${demoWallet}\nNonce: ${nonceRes.data.nonce}`;
-      const signature = '0x' + 'a'.repeat(130);
+    try {
+      const nonceRes = await authAPI.getNonce();
+      const message = `SentinelX Demo Login\nWallet: ${DEMO_WALLET}\nNonce: ${nonceRes.data.nonce}`;
 
       const verifyRes = await authAPI.verify({
         message,
-        signature,
-        wallet_address: demoWallet,
+        signature: DEMO_LOGIN_SIGNATURE,
+        wallet_address: DEMO_WALLET,
         user_agent: navigator.userAgent,
         ...(await getGeolocation()),
       });
 
-      if (verifyRes.data.success) {
-        if (verifyRes.data.step_up_required) {
-          // DON'T authenticate yet — show step-up challenge first
-          setAuthResult(verifyRes.data);
-          setStepUpState({ wallet: demoWallet, hasMetaMask: false, pendingAuth: verifyRes.data });
-        } else {
-          addNotification({
-            type: 'success',
-            title: 'Demo Login Successful',
-            message: `Risk Score: ${verifyRes.data.risk_score} (${verifyRes.data.risk_level})`,
-          });
-          setAuthResult(verifyRes.data);
-          finalizeLogin(verifyRes.data);
-        }
-      } else if (verifyRes.data.security_status === 'locked') {
-        setError(`Account locked: ${verifyRes.data.message}`);
-        setAuthResult(verifyRes.data);
-      }
+      handleAuthResponse(verifyRes.data, 'demo', DEMO_WALLET);
     } catch (err) {
-      setError('Backend not reachable. Please start the FastAPI server first.');
+      setError(getErrorMessage(err, 'Backend not reachable. Please start the FastAPI server first.'));
     }
+
     setLoading(false);
   };
 
   const features = [
-    { icon: HiShieldCheck, title: 'Wallet Security', desc: 'SIWE authentication' },
+    { icon: HiShieldCheck, title: 'Wallet Security', desc: 'Algorand wallet auth' },
     { icon: HiBolt, title: 'Real-time Analysis', desc: 'Instant risk scoring' },
-    { icon: HiCommandLine, title: 'Multiple SDKs', desc: 'Python, JavaScript & Go' },
+    { icon: HiCommandLine, title: 'Anchored Proofs', desc: 'Merkle roots on Algorand' },
   ];
 
   return (
     <div className="landing-container">
-      {/* Step-Up Verification Overlay */}
       {stepUpState && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="glass-card p-8 max-w-md w-full mx-4 border border-yellow-500/30">
-            {/* Header */}
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center">
-                <HiExclamationTriangle className="w-6 h-6 text-yellow-400" />
+          <div className="glass-card mx-4 w-full max-w-md border border-yellow-500/30 p-8">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-500/20">
+                <HiExclamationTriangle className="h-6 w-6 text-yellow-400" />
               </div>
               <div>
                 <h2 className="text-lg font-bold text-white">Step-Up Verification Required</h2>
@@ -284,192 +287,243 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Explanation */}
-            <div className="mb-6 p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
-              <p className="text-sm text-gray-300 leading-relaxed">
-                SentinelX has detected elevated risk on your account. To restore full access and boost your trust score,
-                please confirm your identity by signing a verification message with your wallet.
+            <div className="mb-6 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-4">
+              <p className="text-sm leading-relaxed text-gray-300">
+                SentinelX detected elevated risk on this session. Sign one more message with your
+                wallet to restore full access and raise your trust score.
               </p>
             </div>
 
-            {/* Trust Score Info */}
             {authResult?.trust_score != null && (
-              <div className="mb-6 flex items-center justify-between p-3 rounded-lg bg-sentinel-dark/50 border border-sentinel-border">
+              <div className="mb-6 flex items-center justify-between rounded-lg border border-sentinel-border bg-sentinel-dark/50 p-3">
                 <span className="text-sm text-gray-400">Current Trust Score</span>
-                <span className={`text-lg font-bold font-mono ${authResult.trust_score >= 80 ? 'text-emerald-400' :
-                  authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
-                  }`}>
+                <span
+                  className={`font-mono text-lg font-bold ${
+                    authResult.trust_score >= 80
+                      ? 'text-emerald-400'
+                      : authResult.trust_score >= 50
+                        ? 'text-yellow-400'
+                        : 'text-red-400'
+                  }`}
+                >
                   {authResult.trust_score}/100
                 </span>
               </div>
             )}
 
-            {/* Error */}
             {error && (
-              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
+              <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
                 {error}
               </div>
             )}
 
-            {/* Action Buttons */}
             <div className="space-y-3">
               <button
                 onClick={handleStepUp}
                 disabled={stepUpLoading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:opacity-90 text-white font-semibold text-sm transition-all disabled:opacity-50"
+                className="w-full rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 px-4 py-3 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
               >
                 {stepUpLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="mx-auto h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                 ) : (
-                  <>
-                    <HiFingerPrint className="w-5 h-5" />
-                    {stepUpState.hasMetaMask ? 'Verify with Wallet Signature' : 'Verify Identity (Demo)'}
-                  </>
+                  <span className="flex items-center justify-center gap-2">
+                    <HiFingerPrint className="h-5 w-5" />
+                    {stepUpState.mode === 'demo' ? 'Verify Identity (Demo)' : 'Verify with Pera Wallet'}
+                  </span>
                 )}
               </button>
 
               <button
                 onClick={skipStepUp}
                 disabled={stepUpLoading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-600/50 text-gray-400 hover:text-white hover:border-gray-500 text-sm transition-all disabled:opacity-50"
+                className="w-full rounded-xl border border-gray-600/50 px-4 py-2.5 text-sm text-gray-400 transition-all hover:border-gray-500 hover:text-white disabled:opacity-50"
               >
                 Skip for now (restricted access)
               </button>
             </div>
 
-            <p className="text-xs text-gray-500 mt-4 text-center">
+            <p className="mt-4 text-center text-xs text-gray-500">
               Completing verification will boost your trust score by +20 points
             </p>
           </div>
         </div>
       )}
 
-      {/* Left Panel - Dark (Sign In) */}
       <div className="landing-left">
-        {/* Logo */}
         <div className="landing-logo">
           <div className="landing-logo-icon">
-            <HiShieldCheck className="w-5 h-5 text-white" />
+            <HiShieldCheck className="h-5 w-5 text-white" />
           </div>
           <span className="landing-logo-text">SentinelX</span>
         </div>
 
-        {/* Sign In Content */}
         <div className="landing-signin-content">
           <h1 className="landing-title">Sign in to SentinelX</h1>
-          <p className="landing-subtitle">Get started with Web3 security protection</p>
+          <p className="landing-subtitle">Protect sessions with Algorand-native wallet identity</p>
 
-          {/* Error Message */}
-          {error && !stepUpState && (
-            <div className="landing-error">
-              {error}
-            </div>
-          )}
+          {error && !stepUpState && <div className="landing-error">{error}</div>}
 
-          {/* Auth Result */}
           {authResult && !stepUpState && (
-            <div className={`landing-success ${authResult.security_status === 'locked' ? '!border-red-500/30 !bg-red-500/5' : ''}`}>
-              <div className="flex items-center gap-2 mb-2">
-                <div className={`w-2 h-2 rounded-full ${authResult.security_status === 'locked' ? 'bg-red-500' :
-                  authResult.security_status === 'restricted' ? 'bg-yellow-500' : 'bg-emerald-500'
-                  }`} />
-                <span className={`text-sm font-medium ${authResult.security_status === 'locked' ? 'text-red-400' :
-                  authResult.security_status === 'restricted' ? 'text-yellow-400' : 'text-emerald-400'
-                  }`}>
-                  {authResult.security_status === 'locked' ? 'Account Locked' :
-                    authResult.security_status === 'restricted' ? 'Session Restricted' : 'Authenticated'}
+            <div
+              className={`landing-success ${
+                authResult.security_status === 'locked' ? '!border-red-500/30 !bg-red-500/5' : ''
+              }`}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <div
+                  className={`h-2 w-2 rounded-full ${
+                    authResult.security_status === 'locked'
+                      ? 'bg-red-500'
+                      : authResult.security_status === 'restricted'
+                        ? 'bg-yellow-500'
+                        : 'bg-emerald-500'
+                  }`}
+                />
+                <span
+                  className={`text-sm font-medium ${
+                    authResult.security_status === 'locked'
+                      ? 'text-red-400'
+                      : authResult.security_status === 'restricted'
+                        ? 'text-yellow-400'
+                        : 'text-emerald-400'
+                  }`}
+                >
+                  {authResult.security_status === 'locked'
+                    ? 'Account Locked'
+                    : authResult.security_status === 'restricted'
+                      ? 'Session Restricted'
+                      : 'Authenticated'}
                 </span>
               </div>
               <div className="space-y-1 text-xs text-gray-400">
-                <p>Risk Score: <span className="text-white font-mono">{authResult.risk_score}</span></p>
-                <p>Risk Level: <span className={`font-medium ${authResult.risk_level === 'low' ? 'text-emerald-400' :
-                  authResult.risk_level === 'medium' ? 'text-yellow-400' : 'text-red-400'
-                  }`}>{authResult.risk_level?.toUpperCase()}</span></p>
+                <p>
+                  Risk Score: <span className="font-mono text-white">{authResult.risk_score}</span>
+                </p>
+                <p>
+                  Risk Level:{' '}
+                  <span
+                    className={`font-medium ${
+                      authResult.risk_level === 'low'
+                        ? 'text-emerald-400'
+                        : authResult.risk_level === 'medium'
+                          ? 'text-yellow-400'
+                          : 'text-red-400'
+                    }`}
+                  >
+                    {authResult.risk_level?.toUpperCase()}
+                  </span>
+                </p>
                 {authResult.trust_score != null && (
-                  <p>Trust Score: <span className={`font-bold ${authResult.trust_score >= 80 ? 'text-emerald-400' :
-                    authResult.trust_score >= 50 ? 'text-yellow-400' : 'text-red-400'
-                    }`}>{authResult.trust_score}/100</span></p>
+                  <p>
+                    Trust Score:{' '}
+                    <span
+                      className={`font-bold ${
+                        authResult.trust_score >= 80
+                          ? 'text-emerald-400'
+                          : authResult.trust_score >= 50
+                            ? 'text-yellow-400'
+                            : 'text-red-400'
+                      }`}
+                    >
+                      {authResult.trust_score}/100
+                    </span>
+                  </p>
                 )}
                 {authResult.security_status && authResult.security_status !== 'active' && (
-                  <p>Status: <span className={`font-medium ${authResult.security_status === 'locked' ? 'text-red-400' :
-                    authResult.security_status === 'restricted' ? 'text-red-400' : 'text-yellow-400'
-                    }`}>{authResult.security_status.replace('_', ' ').toUpperCase()}</span></p>
+                  <p>
+                    Status:{' '}
+                    <span
+                      className={`font-medium ${
+                        authResult.security_status === 'locked'
+                          ? 'text-red-400'
+                          : authResult.security_status === 'restricted'
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                      }`}
+                    >
+                      {authResult.security_status.replace('_', ' ').toUpperCase()}
+                    </span>
+                  </p>
                 )}
                 {authResult.locked_until && (
-                  <p className="text-red-400">Unlocks: {new Date(authResult.locked_until).toLocaleTimeString()}</p>
+                  <p className="text-red-400">
+                    Unlocks: {new Date(authResult.locked_until).toLocaleTimeString()}
+                  </p>
                 )}
               </div>
             </div>
           )}
 
-          {/* Buttons */}
           <div className="landing-buttons">
-            <button
-              onClick={handleWalletLogin}
-              disabled={loading}
-              className="landing-btn-primary"
-            >
+            <button onClick={handleWalletLogin} disabled={loading} className="landing-btn-primary">
               {loading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
               ) : (
                 <>
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" className="w-5 h-5" alt="" />
-                  Continue with MetaMask
+                  <HiShieldCheck className="h-5 w-5" />
+                  Continue with Pera Wallet
                 </>
               )}
             </button>
 
-            <button
-              onClick={handleDemoLogin}
-              disabled={loading}
-              className="landing-btn-secondary"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-              </svg>
-              Login with Google
+            <button onClick={handleDemoLogin} disabled={loading} className="landing-btn-secondary">
+              <HiFingerPrint className="h-4 w-4" />
+              Try the Demo Flow
             </button>
           </div>
 
-          {/* Footer Text */}
           <p className="landing-footer-text">
-            SentinelX uses SIWE (EIP-4361) for secure wallet authentication.
-            <br />No passwords. No emails. Just your wallet.
+            SentinelX uses Algorand ed25519 signatures via Pera Wallet for secure authentication.
+            <br />
+            No passwords. No emails. Just your wallet approval.
           </p>
         </div>
       </div>
 
-      {/* Right Panel - Light Card */}
       <div className="landing-right">
         <div className="landing-right-card">
-          {/* Shield Grid Icon */}
           <div className="landing-icon-grid">
             <div className="shield-grid">
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon center"><HiLockClosed /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
-              <div className="shield-icon"><HiShieldCheck /></div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon center">
+                <HiLockClosed />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
+              <div className="shield-icon">
+                <HiShieldCheck />
+              </div>
             </div>
           </div>
 
-          {/* Headline */}
           <h2 className="landing-headline">
-            Adaptive Security<br />with SentinelX
+            Adaptive Security
+            <br />
+            with SentinelX
           </h2>
           <p className="landing-description">
-            Verify identity, analyze behavior, protect data — and record every decision on-chain.
-            Powered by AI-driven risk analysis.
+            Verify identity, analyze behavior, protect data, and anchor every security batch on
+            Algorand with AI-driven risk analysis.
           </p>
 
-          {/* Feature Icons */}
           <div className="landing-features">
             {features.map(({ icon: Icon, title, desc }) => (
               <div key={title} className="landing-feature">

@@ -26,7 +26,7 @@ export default function ModalStyleDemo() {
         {
             icon: HiFingerPrint,
             title: 'Wallet Authentication',
-            description: 'Passwordless login with Ethereum using SIWE (EIP-4361). No emails, no passwords.',
+            description: 'Passwordless login with Algorand wallet signatures through Pera Wallet. No emails, no passwords.',
             accentColor: 'emerald',
         },
         {
@@ -44,7 +44,7 @@ export default function ModalStyleDemo() {
         {
             icon: HiGlobeAlt,
             title: 'On-Chain Audit',
-            description: 'Merkle-batched Ethereum proofs for transparent, immutable security logs.',
+            description: 'Merkle-batched Algorand anchors for transparent, immutable security logs.',
             accentColor: 'purple',
         },
     ];

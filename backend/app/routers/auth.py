@@ -1,34 +1,41 @@
-"""
-SentinelX SIWE Authentication Router
-Wallet-based passwordless login with EIP-4361
-"""
+from __future__ import annotations
+
 import hashlib
+import json
 import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models.models import User, LoginEvent, Nonce
-from app.services.jwt_utils import create_access_token, verify_token, get_wallet_from_token
-from app.services.risk_engine import RiskEngine
-from app.services.merkle import MerkleBatcher
+from app.models.models import LoginEvent, Nonce, User
+from app.services.blockchain import (
+    build_step_up_message,
+    normalize_algorand_address,
+    verify_signature,
+)
 from app.services.enforcement import SecurityEnforcement
+from app.services.jwt_utils import create_access_token, verify_token
+from app.services.merkle import MerkleBatcher
+from app.services.risk_engine import RiskEngine
+
 
 router = APIRouter()
 
-# ─── In-memory nonce store (for hackathon speed) ────────────────────
-nonce_store: dict = {}
-step_up_store: dict = {}  # nonce → { wallet, issued_at, expires_at }
+
+DEMO_WALLET = "SAHBJDRHHRR72JHTWSXZR5VHQQUVC7S757TJZI656FWSDO3TZZWV3IGJV4"
+DEMO_LOGIN_SIGNATURE = "0x" + "a" * 130
+DEMO_STEP_UP_SIGNATURE = "0x" + "b" * 130
+
+step_up_store: dict[str, dict] = {}
 
 
-# ─── Request/Response Models ────────────────────────────────────────
 class NonceResponse(BaseModel):
     nonce: str
     issued_at: str
@@ -57,8 +64,7 @@ class AuthResponse(BaseModel):
     step_up_required: bool = False
     event_hash: Optional[str] = None
     message: str = ""
-    # Enforcement fields
-    security_status: Optional[str] = None  # active, step_up_required, restricted, locked
+    security_status: Optional[str] = None
     trust_score: Optional[int] = None
     locked_until: Optional[str] = None
     session_restricted: bool = False
@@ -66,7 +72,13 @@ class AuthResponse(BaseModel):
 
 class ChallengeRequest(BaseModel):
     wallet_address: str
-    challenge_type: str = "re-sign"  # re-sign, totp, confirm
+    challenge_type: str = "re-sign"
+
+
+class StepUpVerifyRequest(BaseModel):
+    wallet_address: str
+    signature: str
+    nonce: str
 
 
 class SessionResponse(BaseModel):
@@ -75,64 +87,87 @@ class SessionResponse(BaseModel):
     expires_at: Optional[str] = None
 
 
-# ─── Endpoints ──────────────────────────────────────────────────────
+def _extract_nonce(message: str) -> Optional[str]:
+    for line in message.splitlines():
+        if line.startswith("Nonce:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _is_demo_login(req: SIWEVerifyRequest) -> bool:
+    return (
+        req.wallet_address.strip().upper() == DEMO_WALLET
+        and req.message.startswith("SentinelX Demo Login")
+        and req.signature == DEMO_LOGIN_SIGNATURE
+    )
+
 
 @router.get("/nonce", response_model=NonceResponse)
-async def get_nonce():
-    """Generate a fresh nonce for SIWE message signing"""
-    nonce = secrets.token_urlsafe(32)
-    issued_at = datetime.utcnow()
-    expires_at = issued_at + timedelta(minutes=10)
+async def get_nonce(db: AsyncSession = Depends(get_db)):
+    now = datetime.utcnow()
+    expires_at = now + timedelta(minutes=10)
+    nonce = secrets.token_urlsafe(24)
 
-    nonce_store[nonce] = {
-        "issued_at": issued_at.isoformat(),
-        "expires_at": expires_at.isoformat(),
-        "used": False,
-    }
+    db.add(
+        Nonce(
+            id=str(uuid.uuid4()),
+            nonce=nonce,
+            created_at=now,
+            expires_at=expires_at,
+        )
+    )
+    await db.commit()
 
     return NonceResponse(
         nonce=nonce,
-        issued_at=issued_at.isoformat() + "Z",
+        issued_at=now.isoformat() + "Z",
         expires_at=expires_at.isoformat() + "Z",
     )
 
 
 @router.post("/verify", response_model=AuthResponse)
-async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """
-    Verify a SIWE signed message and issue JWT token.
-    Also runs AI risk scoring on the login event.
-    """
-    wallet = req.wallet_address.strip()
+async def verify_siwe(
+    req: SIWEVerifyRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    is_demo = _is_demo_login(req)
 
-    # Validate wallet address format
-    if not wallet.startswith("0x") or len(wallet) != 42:
-        raise HTTPException(status_code=400, detail="Invalid wallet address format")
+    if is_demo:
+        normalized_wallet = DEMO_WALLET
+        wallet_storage = DEMO_WALLET.lower()
+    else:
+        try:
+            normalized_wallet = normalize_algorand_address(req.wallet_address)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Algorand wallet address")
 
-    # For hackathon: simplified SIWE verification
-    # In production, use the siwe library for full EIP-4361 verification
-    try:
-        # Try full SIWE verification
-        is_valid = _verify_signature(req.message, req.signature, wallet)
-    except Exception:
-        # Fallback: accept for demo purposes (signature present = valid)
-        is_valid = len(req.signature) > 20
+        nonce_value = _extract_nonce(req.message)
+        if not nonce_value:
+            return AuthResponse(success=False, message="Nonce missing from signed message.")
 
-    if not is_valid:
-        return AuthResponse(
-            success=False,
-            message="Invalid signature. Please try signing again.",
-        )
+        result = await db.execute(select(Nonce).where(Nonce.nonce == nonce_value))
+        nonce_row = result.scalar_one_or_none()
+        if nonce_row is None or nonce_row.used:
+            return AuthResponse(success=False, message="Nonce is invalid or already used.")
+        if nonce_row.expires_at < datetime.utcnow():
+            return AuthResponse(success=False, message="Nonce expired. Please request a new sign-in message.")
+        if f"Address: {normalized_wallet}" not in req.message:
+            return AuthResponse(success=False, message="Signed message does not match the provided wallet.")
+        if not verify_signature(normalized_wallet, req.message, req.signature):
+            return AuthResponse(success=False, message="Invalid signature. Please try signing again.")
 
-    # Get client IP
-    ip_address = req.ip_address or request.client.host if request.client else "0.0.0.0"
+        nonce_row.used = True
+        nonce_row.wallet_address = normalized_wallet.lower()
+        wallet_storage = normalized_wallet.lower()
+
+    ip_address = req.ip_address or (request.client.host if request.client else "0.0.0.0")
     user_agent = req.user_agent or request.headers.get("user-agent", "")
 
-    # ─── AI Risk Scoring ─────────────────────────────────
     risk_engine = RiskEngine.get_instance()
     risk_score, risk_level, risk_explanation = await risk_engine.score(
         db=db,
-        wallet_address=wallet,
+        wallet_address=wallet_storage,
         ip_address=ip_address,
         user_agent=user_agent,
         geo_country=req.geo_country,
@@ -140,14 +175,12 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
 
     step_up_required = risk_score >= settings.RISK_MEDIUM
 
-    # ─── Create/Update User ──────────────────────────────
-    result = await db.execute(select(User).where(User.wallet_address == wallet.lower()))
+    result = await db.execute(select(User).where(User.wallet_address == wallet_storage))
     user = result.scalar_one_or_none()
-
     if not user:
         user = User(
             id=str(uuid.uuid4()),
-            wallet_address=wallet.lower(),
+            wallet_address=wallet_storage,
             created_at=datetime.utcnow(),
             last_login=datetime.utcnow(),
         )
@@ -155,19 +188,20 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
     else:
         user.last_login = datetime.utcnow()
 
-    # ─── Store Login Event ───────────────────────────────
-    import json
-    event_data = json.dumps({
-        "wallet": wallet.lower(),
-        "ip_hash": hashlib.sha256(ip_address.encode()).hexdigest(),
-        "risk_score": risk_score,
-        "timestamp": datetime.utcnow().isoformat(),
-    }, sort_keys=True)
+    event_data = json.dumps(
+        {
+            "wallet": wallet_storage,
+            "ip_hash": hashlib.sha256(ip_address.encode()).hexdigest(),
+            "risk_score": risk_score,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+        sort_keys=True,
+    )
     event_hash = hashlib.sha256(event_data.encode()).hexdigest()
 
     login_event = LoginEvent(
         id=str(uuid.uuid4()),
-        wallet_address=wallet.lower(),
+        wallet_address=wallet_storage,
         ip_address=ip_address,
         ip_hash=hashlib.sha256(ip_address.encode()).hexdigest(),
         user_agent=user_agent,
@@ -185,25 +219,26 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
     db.add(login_event)
     await db.commit()
 
-    # ─── Add to Merkle Batch ─────────────────────────────
     batcher = MerkleBatcher.get_instance()
-    batcher.add_event(event_hash, event_type="login", metadata={
-        "wallet": wallet.lower(),
-        "risk_level": risk_level,
-    })
+    batcher.add_event(
+        event_hash,
+        event_type="login",
+        metadata={
+            "wallet": wallet_storage,
+            "risk_level": risk_level,
+        },
+    )
 
-    # ─── Security Enforcement ─────────────────────────────
     enforcer = SecurityEnforcement.get_instance()
-    enforcement = await enforcer.evaluate_and_enforce(db, wallet)
+    enforcement = await enforcer.evaluate_and_enforce(db, wallet_storage)
     security_status = enforcement["security_status"]
     is_locked = security_status == "locked"
     is_restricted = security_status in ("restricted", "locked")
 
-    # If locked, deny login entirely
     if is_locked:
         return AuthResponse(
             success=False,
-            wallet_address=wallet.lower(),
+            wallet_address=wallet_storage,
             risk_score=risk_score,
             risk_level=risk_level,
             security_status=security_status,
@@ -212,27 +247,26 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
             message=f"Account temporarily locked. {enforcement['cooldown_reason'] or 'Suspicious activity detected.'}",
         )
 
-    # Merge enforcement step-up with login risk step-up
     enforce_step_up = security_status == "step_up_required" or step_up_required
+    token = create_access_token(
+        data={
+            "sub": wallet_storage,
+            "risk_level": risk_level,
+            "risk_score": risk_score,
+            "security_status": security_status,
+        }
+    )
 
-    # ─── Issue JWT ───────────────────────────────────────
-    token = create_access_token(data={
-        "sub": wallet.lower(),
-        "risk_level": risk_level,
-        "risk_score": risk_score,
-        "security_status": security_status,
-    })
-
-    msg_parts = [f"Welcome! Risk level: {risk_level}"]
+    message_parts = [f"Welcome! Risk level: {risk_level}"]
     if enforce_step_up:
-        msg_parts.append("Step-up verification required.")
+        message_parts.append("Step-up verification required.")
     if is_restricted:
-        msg_parts.append("Some actions are restricted due to elevated risk.")
+        message_parts.append("Some actions are restricted due to elevated risk.")
 
     return AuthResponse(
         success=True,
         token=token,
-        wallet_address=wallet.lower(),
+        wallet_address=wallet_storage,
         risk_score=risk_score,
         risk_level=risk_level,
         risk_explanation=risk_explanation,
@@ -242,75 +276,81 @@ async def verify_siwe(req: SIWEVerifyRequest, request: Request, db: AsyncSession
         trust_score=enforcement["trust_score"],
         locked_until=enforcement["locked_until"],
         session_restricted=is_restricted,
-        message=" — ".join(msg_parts),
+        message=" - ".join(message_parts),
     )
 
 
 @router.post("/challenge")
 async def step_up_challenge(req: ChallengeRequest):
-    """Issue a step-up authentication challenge for high-risk logins"""
-    nonce = secrets.token_urlsafe(32)
-    now = datetime.utcnow()
-    expires_at = now + timedelta(minutes=2)
+    is_demo = req.wallet_address.strip().upper() == DEMO_WALLET
+    try:
+        signer_wallet = DEMO_WALLET if is_demo else normalize_algorand_address(req.wallet_address)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Algorand wallet address")
+
+    nonce = secrets.token_urlsafe(24)
+    issued_at = datetime.utcnow().isoformat() + "Z"
+    expires_at = datetime.utcnow() + timedelta(minutes=2)
+    message = (
+        f"SentinelX Demo Step-Up\nWallet: {DEMO_WALLET}\nNonce: {nonce}\nIssued At: {issued_at}"
+        if is_demo
+        else build_step_up_message(signer_wallet, nonce, issued_at)
+    )
 
     step_up_store[nonce] = {
-        "wallet": req.wallet_address.lower(),
-        "issued_at": now.isoformat(),
+        "wallet": signer_wallet.lower(),
+        "signer": signer_wallet,
+        "issued_at": issued_at,
         "expires_at": expires_at,
+        "is_demo": is_demo,
     }
 
     return {
         "challenge_type": req.challenge_type,
         "nonce": nonce,
-        "message": f"SentinelX Step-Up Verification\n\nSign this message to confirm your identity and restore trust.\n\nWallet: {req.wallet_address}\nNonce: {nonce}\nTimestamp: {now.isoformat()}Z",
+        "message": message,
         "expires_in": 120,
     }
 
 
-class StepUpVerifyRequest(BaseModel):
-    wallet_address: str
-    signature: str
-    nonce: str
-
-
 @router.post("/step-up-verify")
 async def step_up_verify(req: StepUpVerifyRequest, db: AsyncSession = Depends(get_db)):
-    """
-    Verify a step-up challenge signature.
-    On success, boosts trust score toward the active zone.
-    """
-    wallet = req.wallet_address.strip().lower()
-    nonce = req.nonce
-
-    # Validate the challenge nonce exists and hasn't expired
-    challenge = step_up_store.get(nonce)
+    challenge = step_up_store.get(req.nonce)
     if not challenge:
         raise HTTPException(status_code=400, detail="Invalid or expired challenge nonce")
 
-    if challenge["wallet"] != wallet:
-        raise HTTPException(status_code=400, detail="Wallet mismatch")
-
     if datetime.utcnow() > challenge["expires_at"]:
-        step_up_store.pop(nonce, None)
+        step_up_store.pop(req.nonce, None)
         raise HTTPException(status_code=400, detail="Challenge expired. Please request a new one.")
 
-    # Verify signature (same logic as login)
-    expected_message = f"SentinelX Step-Up Verification\n\nSign this message to confirm your identity and restore trust.\n\nWallet: {req.wallet_address}\nNonce: {nonce}\nTimestamp: {challenge['issued_at']}Z"
-    try:
-        is_valid = _verify_signature(expected_message, req.signature, wallet)
-    except Exception:
-        is_valid = len(req.signature) > 20 and req.signature.startswith("0x")
+    if challenge["is_demo"]:
+        expected_wallet = DEMO_WALLET
+        expected_message = (
+            f"SentinelX Demo Step-Up\nWallet: {DEMO_WALLET}\nNonce: {req.nonce}\nIssued At: {challenge['issued_at']}"
+        )
+        if req.wallet_address.strip().upper() != expected_wallet or req.signature != DEMO_STEP_UP_SIGNATURE:
+            raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        try:
+            normalized_wallet = normalize_algorand_address(req.wallet_address)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Algorand wallet address")
 
-    if not is_valid:
-        raise HTTPException(status_code=401, detail="Invalid signature")
+        if normalized_wallet.lower() != challenge["wallet"]:
+            raise HTTPException(status_code=400, detail="Wallet mismatch")
 
-    # Consume the nonce
-    step_up_store.pop(nonce, None)
+        expected_message = build_step_up_message(
+            challenge["signer"],
+            req.nonce,
+            challenge["issued_at"],
+        )
+        if not verify_signature(normalized_wallet, expected_message, req.signature):
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Boost trust score via enforcement service
+    step_up_store.pop(req.nonce, None)
+
     enforcer = SecurityEnforcement.get_instance()
-    result = await enforcer.complete_step_up(db, wallet, boost=20)
-
+    result = await enforcer.complete_step_up(db, challenge["wallet"], boost=20)
     return {
         "success": True,
         "message": "Step-up verification successful. Trust score boosted.",
@@ -320,13 +360,11 @@ async def step_up_verify(req: StepUpVerifyRequest, db: AsyncSession = Depends(ge
 
 @router.get("/session", response_model=SessionResponse)
 async def get_session(authorization: Optional[str] = Header(None)):
-    """Check if the current JWT session is valid"""
     if not authorization:
         return SessionResponse(valid=False)
 
     token = authorization.replace("Bearer ", "")
     payload = verify_token(token)
-
     if not payload:
         return SessionResponse(valid=False)
 
@@ -339,7 +377,6 @@ async def get_session(authorization: Optional[str] = Header(None)):
 
 @router.post("/logout")
 async def logout():
-    """Logout — client should discard the JWT"""
     return {"success": True, "message": "Session ended. Please discard your token."}
 
 
@@ -348,7 +385,6 @@ async def get_security_state(
     wallet_address: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the current security enforcement state for a wallet."""
     enforcer = SecurityEnforcement.get_instance()
     return await enforcer.get_security_state(db, wallet_address)
 
@@ -358,22 +394,5 @@ async def refresh_security_state(
     wallet_address: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Recompute and return the security enforcement state."""
     enforcer = SecurityEnforcement.get_instance()
     return await enforcer.evaluate_and_enforce(db, wallet_address)
-
-
-# ─── Helpers ─────────────────────────────────────────────────────────
-
-def _verify_signature(message: str, signature: str, expected_address: str) -> bool:
-    """Verify an Ethereum signature against a message and expected address"""
-    try:
-        from eth_account.messages import encode_defunct
-        from eth_account import Account
-
-        msg = encode_defunct(text=message)
-        recovered = Account.recover_message(msg, signature=signature)
-        return recovered.lower() == expected_address.lower()
-    except Exception:
-        # For demo: if we can't verify cryptographically, check signature format
-        return len(signature) > 20 and signature.startswith("0x")

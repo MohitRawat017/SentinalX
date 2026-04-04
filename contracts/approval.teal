@@ -1,0 +1,41 @@
+#pragma version 6
+txn ApplicationID
+int 0
+==
+bnz main_l6
+txn OnCompletion
+int NoOp
+==
+bnz main_l3
+err
+main_l3:
+txna ApplicationArgs 0
+byte "store_batch"
+==
+bnz main_l5
+err
+main_l5:
+txn NumAppArgs
+int 2
+==
+assert
+byte "last_root"
+txna ApplicationArgs 1
+app_global_put
+byte "batch_count"
+byte "batch_count"
+app_global_get
+int 1
++
+app_global_put
+int 1
+return
+main_l6:
+byte "batch_count"
+int 0
+app_global_put
+byte "last_root"
+byte ""
+app_global_put
+int 1
+return

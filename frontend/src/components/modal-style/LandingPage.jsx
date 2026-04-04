@@ -25,8 +25,8 @@ export default function LandingPage() {
     const features = [
         {
             icon: HiFingerPrint,
-            title: 'SIWE Wallet Authentication',
-            description: 'Passwordless login with Ethereum using SIWE (EIP-4361). No emails, no passwords, just your wallet.',
+            title: 'Algorand Wallet Authentication',
+            description: 'Passwordless login with Algorand wallet signatures through Pera Wallet. No emails, no passwords, just your wallet.',
             accentColor: 'emerald',
         },
         {
@@ -44,7 +44,7 @@ export default function LandingPage() {
         {
             icon: HiGlobeAlt,
             title: 'On-Chain Audit Trail',
-            description: 'Merkle-batched Ethereum proofs for transparent, immutable, and verifiable security logs.',
+            description: 'Merkle-batched Algorand anchors for transparent, immutable, and verifiable security logs.',
             accentColor: 'purple',
         },
     ];
@@ -181,7 +181,7 @@ export default function LandingPage() {
             <section id="features">
                 <ModalFeatureCards
                     sectionTitle="Built for Security-First Teams"
-                    sectionSubtitle="Everything you need to protect your users and data with cutting-edge Web3 security"
+                    sectionSubtitle="Everything you need to protect your users and data with adaptive, on-chain security"
                     features={features}
                     columns={4}
                 />

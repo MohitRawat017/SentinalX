@@ -1,0 +1,2 @@
+py-algorand-sdk>=2.6,<3.0
+pyteal>=0.27,<0.28

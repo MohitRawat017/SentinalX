@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { auditAPI } from '../api';
+import { getAlgorandExplorerUrl } from '../api/blockchain';
 import useStore from '../store';
 import { HiLink, HiCheckCircle, HiXCircle, HiArrowPath, HiBeaker } from 'react-icons/hi2';
 
@@ -75,7 +76,7 @@ export default function AuditPage() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Security Evidence & Blockchain Proofs</h1>
           <p className="text-sm text-gray-400 mt-1">
-            Tamper-proof security logs anchored on Ethereum
+            Tamper-proof security logs anchored on Algorand TestNet
           </p>
         </div>
         <div className="flex gap-2">
@@ -108,7 +109,7 @@ export default function AuditPage() {
             <p className="text-2xl font-bold text-cyan-400">{stats.total_batches}</p>
           </div>
           <div className="bg-white/[0.03] backdrop-blur-sm rounded-2xl border border-white/10 p-4">
-            <p className="text-xs text-gray-500">Events On-Chain</p>
+            <p className="text-xs text-gray-500">Events Anchored</p>
             <p className="text-2xl font-bold text-emerald-400">{stats.total_events_batched}</p>
           </div>
         </div>
@@ -142,12 +143,12 @@ export default function AuditPage() {
                   </div>
                   {batch.tx_hash && (
                     <a
-                      href={`https://sepolia.etherscan.io/tx/${batch.tx_hash}`}
+                      href={batch.explorer_url || getAlgorandExplorerUrl(batch.tx_hash)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs text-emerald-400 hover:underline mt-1 block"
                     >
-                      View on Etherscan
+                      View on Pera Explorer
                     </a>
                   )}
                 </div>
@@ -224,10 +225,20 @@ export default function AuditPage() {
                     )}
                     <span className={`text-sm ${verifyResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
                       {verifyResult.success
-                        ? 'Event is cryptographically proven to exist on-chain'
+                        ? 'Event is cryptographically proven against the Algorand anchor'
                         : 'Event not found in this batch'}
                     </span>
                   </div>
+                  {verifyResult.success && verifyResult.tx_hash && (
+                    <a
+                      href={verifyResult.explorer_url || getAlgorandExplorerUrl(verifyResult.tx_hash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 block text-xs text-emerald-400 hover:underline"
+                    >
+                      View anchor transaction
+                    </a>
+                  )}
                 </div>
               )}
             </div>

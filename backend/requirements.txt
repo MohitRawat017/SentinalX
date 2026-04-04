@@ -10,7 +10,8 @@ pydantic-settings==2.2.1
 # Authentication & JWT
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-eth-account==0.11.3
+py-algorand-sdk>=2.6,<3.0
+PyNaCl>=1.5,<2.0
 
 # Database
 sqlalchemy==2.0.27

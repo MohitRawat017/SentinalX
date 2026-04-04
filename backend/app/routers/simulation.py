@@ -1,6 +1,41 @@
 """
-SentinelX Simulation Router
-Live attack simulation for demo mode
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                     SentinelX Simulation Router                              ║
+║                     Live Attack Simulation for Demo Mode                      ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║ PURPOSE: Generate realistic attack scenarios for demonstration and testing    ║
+║                                                                               ║
+║ ═════════════════════════════════════════════════════════════════════════════║
+║ WHY SIMULATION?                                                               ║
+║ ═════════════════════════════════════════════════════════════════════════════║
+║                                                                               ║
+║ For demos and testing, we need:                                              ║
+║ - Realistic attack patterns to show the system working                       ║
+║ - Sample data for dashboards and visualizations                              ║
+║ - Testing edge cases without real attacks                                    ║
+║ - Quick way to demonstrate all security features                             ║
+║                                                                               ║
+║ ═════════════════════════════════════════════════════════════════════════════║
+║ AVAILABLE SCENARIOS:                                                          ║
+║ ═════════════════════════════════════════════════════════════════════════════║
+║                                                                               ║
+║ 1. suspicious_login  - Login from flagged IP (Russia, Nigeria, etc.)         ║
+║ 2. normal_login      - Regular login from trusted location                   ║
+║ 3. data_leak         - Attempt to send credit cards, SSN, API keys           ║
+║ 4. clean_text        - Normal message that passes DLP                        ║
+║ 5. burst_attack      - Rapid-fire logins (brute force simulation)            ║
+║ 6. risky_transaction - High-value transfer with urgency language             ║
+║ 7. safe_transaction  - Normal ETH transfer to known recipient                ║
+║ 8. full_demo         - Complete demo of all scenarios in sequence            ║
+║                                                                               ║
+║ INTERVIEW QUESTION: Why include simulation in production code?               ║
+║ ANSWER: Multiple benefits:                                                   ║
+║ - Sales demos: Show the product working                                       ║
+║ - QA testing: Verify security features                                        ║
+║ - Training: Help users understand threats                                    ║
+║ - Development: Test without real attack data                                 ║
+║ Can be disabled in production via environment variable.                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 import hashlib
 import json
@@ -21,10 +56,19 @@ from app.services.transaction_risk import TransactionRiskEngine
 from app.services.merkle import MerkleBatcher
 from app.services.enforcement import SecurityEnforcement
 
+
+# ───────────────────────────────────────────────────────────────────────────────
+# ROUTER SETUP
+# ───────────────────────────────────────────────────────────────────────────────
 router = APIRouter()
 
-# ─── Simulation Scenarios ───────────────────────────────────────────
 
+# ───────────────────────────────────────────────────────────────────────────────
+# SIMULATION DATA
+# ───────────────────────────────────────────────────────────────────────────────
+
+# IPs associated with suspicious activity (for demo)
+# In production, these would come from threat intelligence feeds
 SUSPICIOUS_IPS = [
     {"ip": "185.220.101.42", "country": "Russia", "city": "Moscow", "lat": 55.7558, "lng": 37.6173},
     {"ip": "103.75.190.11", "country": "Nigeria", "city": "Lagos", "lat": 6.5244, "lng": 3.3792},
@@ -33,12 +77,15 @@ SUSPICIOUS_IPS = [
     {"ip": "91.108.56.12", "country": "Brazil", "city": "Sao Paulo", "lat": -23.5505, "lng": -46.6333},
 ]
 
+# IPs associated with normal traffic
 NORMAL_IPS = [
     {"ip": "73.162.48.93", "country": "United States", "city": "San Francisco", "lat": 37.7749, "lng": -122.4194},
     {"ip": "82.132.225.11", "country": "United Kingdom", "city": "London", "lat": 51.5074, "lng": -0.1278},
     {"ip": "192.168.1.100", "country": "United States", "city": "New York", "lat": 40.7128, "lng": -74.0060},
 ]
 
+# Text containing sensitive data (for DLP testing)
+# These are FAKE - for demonstration only
 SENSITIVE_TEXTS = [
     "My credit card number is 4532015112830366 and the CVV is 123",
     "Password: SuperSecret123! for admin@company.com",
@@ -50,12 +97,14 @@ SENSITIVE_TEXTS = [
     "Patient diagnosis: Type 2 diabetes, prescribed metformin 500mg",
 ]
 
+# Normal text that should pass DLP checks
 CLEAN_TEXTS = [
     "Hey, the meeting is at 3pm tomorrow. See you there!",
     "Can you review the PR? I added some tests.",
     "The weather looks great this weekend for hiking.",
 ]
 
+# Sample wallet addresses for testing
 WALLETS = [
     "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28",
     "0x1234567890abcdef1234567890abcdef12345678",
@@ -65,20 +114,42 @@ WALLETS = [
 ]
 
 
+# ───────────────────────────────────────────────────────────────────────────────
+# REQUEST MODELS
+# ───────────────────────────────────────────────────────────────────────────────
+
 class SimulationRequest(BaseModel):
+    """
+    Request to run a simulation scenario.
+    
+    @param scenario: Type of simulation to run
+    @param wallet_address: Target wallet (random if not specified)
+    @param count: Number of events to generate
+    """
     scenario: str  # suspicious_login, normal_login, data_leak, clean_text, burst_attack, risky_transaction, safe_transaction, full_demo
     wallet_address: Optional[str] = None
     count: int = 1
 
 
-# ─── Endpoints ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/run")
 async def run_simulation(req: SimulationRequest, db: AsyncSession = Depends(get_db)):
-    """Run an attack simulation scenario"""
+    """
+    Run an attack simulation scenario.
+    
+    Creates realistic events in the database to demonstrate
+    the security system's detection and response capabilities.
+    
+    After simulation, triggers enforcement pipeline to update
+    the user's trust score and security status.
+    """
     wallet = req.wallet_address or random.choice(WALLETS)
     results = []
 
+    # Route to appropriate simulation based on scenario
     if req.scenario == "suspicious_login":
         results = await _simulate_suspicious_login(wallet, req.count, db)
     elif req.scenario == "normal_login":
@@ -113,7 +184,7 @@ async def run_simulation(req: SimulationRequest, db: AsyncSession = Depends(get_
 
 @router.get("/scenarios")
 async def list_scenarios():
-    """List available simulation scenarios"""
+    """List available simulation scenarios with descriptions."""
     return {
         "scenarios": [
             {"id": "suspicious_login", "name": "Suspicious Login", "description": "Login from a suspicious IP with unusual device fingerprint"},
@@ -128,9 +199,17 @@ async def list_scenarios():
     }
 
 
-# ─── Simulation Implementations ─────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIMULATION IMPLEMENTATIONS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
+    """
+    Simulate login from a suspicious location.
+    
+    Uses IPs from high-risk countries and unusual user agents.
+    Forces risk_score to at least 0.7 to demonstrate high-risk detection.
+    """
     results = []
     risk_engine = RiskEngine.get_instance()
     batcher = MerkleBatcher.get_instance()
@@ -144,12 +223,13 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
             ip_address=ip_info["ip"],
             user_agent="Mozilla/5.0 (Linux; Android 4.4) AppleWebKit/537.36 UnknownBot/1.0",
             geo_country=ip_info["country"],
-            current_hour=random.choice([1, 2, 3, 4, 23]),
+            current_hour=random.choice([1, 2, 3, 4, 23]),  # Unusual hours
         )
         # Amplify risk for demo: ensure high score
         risk_score = max(risk_score, 0.7)
         risk_level = "high"
 
+        # Create event hash for audit trail
         event_data = json.dumps({
             "wallet": wallet.lower(), "ip": ip_info["ip"],
             "risk_score": risk_score, "sim": True,
@@ -159,6 +239,7 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
 
         features = {f["feature"]: f["value"] for f in explanation.get("factors", [])}
 
+        # Create and store the login event
         login_event = LoginEvent(
             id=str(uuid.uuid4()),
             wallet_address=wallet.lower(),
@@ -196,6 +277,11 @@ async def _simulate_suspicious_login(wallet: str, count: int, db: AsyncSession):
 
 
 async def _simulate_normal_login(wallet: str, count: int, db: AsyncSession):
+    """
+    Simulate normal login from a trusted location.
+    
+    Uses IPs from low-risk countries and normal user agents.
+    """
     results = []
     risk_engine = RiskEngine.get_instance()
     batcher = MerkleBatcher.get_instance()
@@ -209,7 +295,7 @@ async def _simulate_normal_login(wallet: str, count: int, db: AsyncSession):
             ip_address=ip_info["ip"],
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0",
             geo_country=ip_info["country"],
-            current_hour=random.choice([9, 10, 11, 14, 15, 16]),
+            current_hour=random.choice([9, 10, 11, 14, 15, 16]),  # Normal work hours
         )
 
         event_data = json.dumps({
@@ -252,6 +338,12 @@ async def _simulate_normal_login(wallet: str, count: int, db: AsyncSession):
 
 
 async def _simulate_data_leak(wallet: str, count: int, db: AsyncSession):
+    """
+    Simulate data leak attempts.
+    
+    Uses text containing credit cards, SSN, passwords, etc.
+    Demonstrates DLP (Data Loss Prevention) detection.
+    """
     results = []
     guard = GuardLayer()
     batcher = MerkleBatcher.get_instance()
@@ -267,7 +359,7 @@ async def _simulate_data_leak(wallet: str, count: int, db: AsyncSession):
             scan_type="regex",
             risk_detected=scan_result["is_risky"],
             risk_categories=scan_result["categories"],
-            user_override=random.choice([True, False]),
+            user_override=random.choice([True, False]),  # Sometimes user overrides
             event_hash=scan_result["event_hash"],
             timestamp=datetime.utcnow() - timedelta(minutes=random.randint(0, 60)),
         )
@@ -288,6 +380,7 @@ async def _simulate_data_leak(wallet: str, count: int, db: AsyncSession):
 
 
 async def _simulate_clean_text(wallet: str, count: int, db: AsyncSession):
+    """Simulate normal text that should pass DLP checks."""
     results = []
     guard = GuardLayer()
 
@@ -306,7 +399,12 @@ async def _simulate_clean_text(wallet: str, count: int, db: AsyncSession):
 
 
 async def _simulate_burst_attack(wallet: str, db: AsyncSession):
-    """Simulate rapid-fire login burst (brute force attempt)"""
+    """
+    Simulate rapid-fire login burst (brute force attempt).
+    
+    Creates 8 login attempts in quick succession (3 seconds apart).
+    This triggers the "rapid_attempts" risk factor.
+    """
     results = []
     risk_engine = RiskEngine.get_instance()
     batcher = MerkleBatcher.get_instance()
@@ -320,7 +418,7 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
             ip_address=ip_info["ip"],
             user_agent=f"Bot-Scanner/{random.randint(1,99)}",
             geo_country=ip_info["country"],
-            current_hour=3,
+            current_hour=3,  # 3 AM - unusual hour
         )
         # Amplify for demo
         risk_score = max(risk_score, 0.75)
@@ -347,7 +445,7 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
             risk_features={f["feature"]: f["value"] for f in explanation.get("factors", [])},
             step_up_required=True,
             event_hash=event_hash,
-            timestamp=datetime.utcnow() - timedelta(seconds=i * 3),
+            timestamp=datetime.utcnow() - timedelta(seconds=i * 3),  # 3 seconds apart
         )
         db.add(login_event)
         batcher.add_event(event_hash, "burst_sim")
@@ -365,7 +463,18 @@ async def _simulate_burst_attack(wallet: str, db: AsyncSession):
 
 
 async def _simulate_full_demo(wallet: str, db: AsyncSession):
-    """Run full demo sequence"""
+    """
+    Run complete demo sequence showing all security features.
+    
+    Phases:
+    1. Normal logins (establish baseline)
+    2. Suspicious login (trigger warning)
+    3. Data leak attempts (DLP detection)
+    4. Risky transaction (transaction protection)
+    5. Burst attack (brute force detection)
+    
+    Creates a Merkle batch at the end for audit trail.
+    """
     results = []
 
     # Phase 1: Normal logins
@@ -388,9 +497,9 @@ async def _simulate_full_demo(wallet: str, db: AsyncSession):
     burst = await _simulate_burst_attack(wallet, db)
     results.extend([{**r, "phase": "5_burst"} for r in burst])
 
-    # Force create a Merkle batch
+    # Force create a Merkle batch for all the simulated events
     batcher = MerkleBatcher.get_instance()
-    batch = batcher.create_batch()
+    batch = await batcher.create_batch(force=True)
 
     batch_info = None
     if batch:
@@ -413,7 +522,14 @@ async def _simulate_full_demo(wallet: str, db: AsyncSession):
 
 
 async def _simulate_risky_transaction(wallet: str, count: int, db: AsyncSession):
-    """Simulate high-risk ETH transfers."""
+    """
+    Simulate high-risk ETH transfers.
+    
+    Uses:
+    - Large amounts (5-25 ETH)
+    - Unknown recipients
+    - Urgency language in chat context
+    """
     results = []
     tx_engine = TransactionRiskEngine.get_instance()
     batcher = MerkleBatcher.get_instance()
@@ -452,7 +568,7 @@ async def _simulate_risky_transaction(wallet: str, count: int, db: AsyncSession)
             risk_score=risk_score,
             risk_level=risk_level,
             risk_factors={f["feature"]: f["value"] for f in explanation.get("factors", [])},
-            status="blocked",
+            status="blocked",  # High risk = blocked
             step_up_required=True,
             cooldown_until=datetime.utcnow() + timedelta(minutes=10),
             event_hash=event_hash,
@@ -477,7 +593,14 @@ async def _simulate_risky_transaction(wallet: str, count: int, db: AsyncSession)
 
 
 async def _simulate_safe_transaction(wallet: str, count: int, db: AsyncSession):
-    """Simulate normal, safe ETH transfers."""
+    """
+    Simulate normal, safe ETH transfers.
+    
+    Uses:
+    - Small amounts (0.01-0.05 ETH)
+    - Known recipients
+    - Normal chat context
+    """
     results = []
     tx_engine = TransactionRiskEngine.get_instance()
     batcher = MerkleBatcher.get_instance()
@@ -510,7 +633,7 @@ async def _simulate_safe_transaction(wallet: str, count: int, db: AsyncSession):
             risk_score=risk_score,
             risk_level=risk_level,
             risk_factors={f["feature"]: f["value"] for f in explanation.get("factors", [])},
-            status="completed",
+            status="completed",  # Low risk = completed
             event_hash=event_hash,
             created_at=datetime.utcnow() - timedelta(minutes=random.randint(0, 60)),
         )
@@ -529,3 +652,57 @@ async def _simulate_safe_transaction(wallet: str, count: int, db: AsyncSession):
 
     await db.commit()
     return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTERVIEW QUESTIONS FOR simulation.py
+# ═══════════════════════════════════════════════════════════════════════════════
+"""
+Q1: Should simulation endpoints be in production?
+A1: Depends on requirements:
+    Include if:
+    - Sales team needs demos
+    - QA needs testing data
+    - Users need training
+    
+    Exclude if:
+    - Strict security requirements
+    - No demo needs
+    - Want minimal attack surface
+    
+    If included, add authentication and rate limiting.
+
+Q2: How is simulation data different from real data?
+A2: In this implementation:
+    - Events are marked with "sim": True in metadata
+    - Event hashes include simulation indicator
+    - Batch event_type includes "_sim" suffix
+    
+    This allows filtering out simulation data from real analytics.
+
+Q3: Why force high risk scores in simulations?
+A3: To demonstrate the system working:
+    - A "suspicious login" scenario should show high risk
+    - Otherwise, random factors might make it look low risk
+    - Demo should show "worst case" detection
+    
+    Real risk engine doesn't force scores - this is just for demo.
+
+Q4: What's the purpose of the full_demo scenario?
+A4: Shows the complete security journey:
+    1. Normal usage (baseline established)
+    2. Attack begins (detection triggers)
+    3. Multiple attack vectors (all features demonstrated)
+    4. Enforcement kicks in (trust score drops)
+    5. Account gets protected
+    
+    Great for presentations and user education.
+
+Q5: How would you make simulations more realistic?
+A5: Improvements:
+    - Use real threat intelligence data for IPs
+    - Generate realistic user agents from actual browsers
+    - Add time-based patterns (attacks at night)
+    - Include multi-stage attacks (phishing -> credential theft)
+    - Simulate user behavior (login -> browse -> logout)
+"""
