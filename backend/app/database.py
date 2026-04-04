@@ -21,11 +21,13 @@
 ║ This enables handling thousands of concurrent connections with one worker.   ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.models.models import Base
+from app.services.blockchain import LEGACY_TRANSACTION_NETWORK
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -216,11 +218,33 @@ async def init_db():
 
             # Create any missing tables from models.py definitions.
             await conn.run_sync(Base.metadata.create_all)
+            await bootstrap_transaction_event_network(conn)
     except Exception as exc:
         hint = get_database_error_hint(exc)
         if hint:
             raise RuntimeError(f"Database initialization failed. {hint}") from exc
         raise
+
+
+async def bootstrap_transaction_event_network(conn) -> None:
+    def get_columns(sync_conn):
+        inspector = inspect(sync_conn)
+        return {column["name"] for column in inspector.get_columns("transaction_events")}
+
+    columns = await conn.run_sync(get_columns)
+    if "network" not in columns:
+        await conn.execute(text("ALTER TABLE transaction_events ADD COLUMN network VARCHAR"))
+
+    await conn.execute(
+        text(
+            """
+            UPDATE transaction_events
+            SET network = :legacy_network
+            WHERE network IS NULL
+            """
+        ),
+        {"legacy_network": LEGACY_TRANSACTION_NETWORK},
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────────────

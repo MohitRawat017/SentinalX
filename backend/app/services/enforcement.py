@@ -75,6 +75,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import (
     LoginEvent, GuardEvent, TransactionEvent, SecurityState,
 )
+from app.services.blockchain import get_transaction_network
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TRUST SCORE THRESHOLDS
@@ -177,7 +178,8 @@ class SecurityEnforcement:
         tx_events = (await db.execute(
             select(TransactionEvent).where(
                 (TransactionEvent.sender_wallet == w) |
-                (TransactionEvent.recipient_wallet == w)
+                (TransactionEvent.recipient_wallet == w),
+                TransactionEvent.network == get_transaction_network(),
             ).order_by(desc(TransactionEvent.created_at)).limit(100)
         )).scalars().all()
 

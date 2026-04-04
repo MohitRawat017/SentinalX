@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../store';
-import { chatAPI, transactionAPI } from '../api';
+import { authAPI, chatAPI, transactionAPI } from '../api';
+import {
+  connectPeraWallet,
+  getAlgorandExplorerUrl,
+  isLegacyEthereumAddress,
+  looksLikeAlgorandAddress,
+  signMessageWithPera,
+  submitAlgoTransfer,
+  validateAlgorandAddress,
+} from '../api/blockchain';
 import {
   HiPaperAirplane,
   HiShieldCheck,
@@ -28,6 +37,7 @@ export default function ChatPage() {
   const [showSendEth, setShowSendEth] = useState(false);
   const [ethAmount, setEthAmount] = useState('');
   const [txRisk, setTxRisk] = useState(null);
+  const [txReceipt, setTxReceipt] = useState(null);
   const [txLoading, setTxLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -101,6 +111,10 @@ export default function ChatPage() {
       setMessages([]);
     }
     setWarning(null);
+    setShowSendEth(false);
+    setEthAmount('');
+    setTxRisk(null);
+    setTxReceipt(null);
   }, [selectedConv]);
 
   // Auto-scroll

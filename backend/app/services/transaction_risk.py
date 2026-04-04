@@ -58,6 +58,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import TransactionEvent
+from app.services.blockchain import get_transaction_network
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -467,6 +468,7 @@ class TransactionRiskEngine:
         result = await db.execute(
             select(TransactionEvent).where(
                 TransactionEvent.sender_wallet == wallet,
+                TransactionEvent.network == get_transaction_network(),
                 TransactionEvent.cooldown_until != None,
                 TransactionEvent.cooldown_until > datetime.utcnow(),
             ).limit(1)
@@ -485,6 +487,7 @@ class TransactionRiskEngine:
             select(TransactionEvent)
             .where(
                 TransactionEvent.sender_wallet == wallet,
+                TransactionEvent.network == get_transaction_network(),
                 TransactionEvent.status == "completed",
             )
             .order_by(desc(TransactionEvent.created_at))

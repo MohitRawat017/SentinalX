@@ -3,18 +3,22 @@ const DEFAULT_EXPLORER_BASE =
   'https://testnet.explorer.perawallet.app/tx/';
 const DEFAULT_PERA_CHAIN_ID = 416002;
 const VALID_PERA_CHAIN_IDS = new Set([4160, 416001, 416002, 416003]);
+const DEFAULT_ALGOD_URL =
+  import.meta.env.VITE_ALGO_NODE_URL ||
+  import.meta.env.VITE_ALGO_ALGOD_URL ||
+  'https://testnet-api.algonode.cloud';
+const DEFAULT_ALGOD_TOKEN =
+  import.meta.env.VITE_ALGO_NODE_TOKEN ||
+  import.meta.env.VITE_ALGO_ALGOD_TOKEN ||
+  '';
 const PERA_MODAL_WRAPPER_ID = 'pera-wallet-connect-modal-wrapper';
 const WEB_WALLET_OPTION_ID = 'web-wallet-option';
 const MOBILE_WALLET_OPTION_ID = 'mobile-wallet-option';
+const ALGO_ADDRESS_PATTERN = /^[A-Z2-7]{58}$/i;
+const LEGACY_ETH_ADDRESS_PATTERN = /^0x[a-f0-9]{40}$/i;
 
-function resolvePeraChainId() {
-  const configuredChainId = Number(import.meta.env.VITE_ALGO_CHAIN_ID || DEFAULT_PERA_CHAIN_ID);
-
-  return VALID_PERA_CHAIN_IDS.has(configuredChainId)
-    ? configuredChainId
-    : DEFAULT_PERA_CHAIN_ID;
-}
-
+let algosdkPromise = null;
+let algodClientPromise = null;
 let peraWalletPromise = null;
 
 export const DEMO_WALLET =
@@ -22,79 +26,49 @@ export const DEMO_WALLET =
 export const DEMO_LOGIN_SIGNATURE = `0x${'a'.repeat(130)}`;
 export const DEMO_STEP_UP_SIGNATURE = `0x${'b'.repeat(130)}`;
 
-export function isMobilePeraFlow() {
-  if (typeof navigator === 'undefined') {
-    return false;
-  }
-
-  const userAgent = navigator.userAgent || navigator.vendor || '';
-  const isTouchMac = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
-
-  return (
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(userAgent) ||
-    isTouchMac
-  );
+function resolvePeraChainId() {
+  const configuredChainId = Number(import.meta.env.VITE_ALGO_CHAIN_ID || DEFAULT_PERA_CHAIN_ID);
+  return VALID_PERA_CHAIN_IDS.has(configuredChainId)
+    ? configuredChainId
+    : DEFAULT_PERA_CHAIN_ID;
 }
 
-function promoteDesktopQrFlow() {
-  if (typeof document === 'undefined' || isMobilePeraFlow()) {
-    return () => {};
+function parseAlgoAmount(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(raw)) {
+    throw new Error('Enter a valid ALGO amount with up to 6 decimals.');
   }
 
-  const applyQrOnlyMode = () => {
-    const modalWrapper = document.getElementById(PERA_MODAL_WRAPPER_ID);
-    const modal = modalWrapper?.querySelector('pera-wallet-connect-modal');
-    const desktopMode = modal?.shadowRoot?.querySelector('pera-wallet-modal-desktop-mode');
-    const desktopRoot = desktopMode?.shadowRoot;
+  const [wholePart = '0', fractionalPart = ''] = raw.split('.');
+  const microalgos =
+    BigInt(wholePart) * 1000000n +
+    BigInt((fractionalPart + '000000').slice(0, 6) || '0');
 
-    if (!desktopRoot) {
-      return false;
-    }
-
-    const webWalletOption = desktopRoot.getElementById(WEB_WALLET_OPTION_ID);
-    const mobileWalletOption = desktopRoot.getElementById(MOBILE_WALLET_OPTION_ID);
-
-    webWalletOption?.remove();
-    mobileWalletOption?.classList.add('pera-wallet-accordion-item--active');
-    desktopRoot
-      .querySelectorAll('.pera-wallet-accordion-item')
-      .forEach((item) => {
-        if (item.id !== MOBILE_WALLET_OPTION_ID) {
-          item.classList.remove('pera-wallet-accordion-item--active');
-        }
-      });
-
-    const downloadDescription = desktopRoot.querySelector(
-      '.pera-wallet-connect-modal-desktop-mode__download-pera-description',
-    );
-
-    if (downloadDescription) {
-      downloadDescription.textContent = 'Scan this QR code with Pera Wallet on your phone.';
-    }
-
-    return true;
-  };
-
-  if (applyQrOnlyMode()) {
-    return () => {};
+  if (microalgos <= 0n) {
+    throw new Error('Enter a valid ALGO amount.');
   }
 
-  const observer = new MutationObserver(() => {
-    if (applyQrOnlyMode()) {
-      observer.disconnect();
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  const timeoutId = window.setTimeout(() => {
-    observer.disconnect();
-  }, 10000);
-
-  return () => {
-    window.clearTimeout(timeoutId);
-    observer.disconnect();
+  return {
+    microalgos,
+    normalized: fractionalPart ? `${wholePart}.${fractionalPart}` : wholePart,
   };
+}
+
+async function getAlgosdk() {
+  if (!algosdkPromise) {
+    algosdkPromise = import('algosdk');
+  }
+
+  return algosdkPromise;
+}
+
+async function getAlgodClient() {
+  if (!algodClientPromise) {
+    const algosdk = await getAlgosdk();
+    algodClientPromise = new algosdk.Algodv2(DEFAULT_ALGOD_TOKEN, DEFAULT_ALGOD_URL, '');
+  }
+
+  return algodClientPromise;
 }
 
 async function getPeraWallet() {
@@ -130,10 +104,7 @@ function getMatchingAccount(accounts, expectedAddress) {
   }
 
   const normalizedExpected = expectedAddress.trim().toUpperCase();
-
-  return (
-    accounts.find((account) => account.trim().toUpperCase() === normalizedExpected) || null
-  );
+  return accounts.find((account) => account.trim().toUpperCase() === normalizedExpected) || null;
 }
 
 function toUint8Array(value) {
@@ -163,12 +134,7 @@ function toUint8Array(value) {
   }
 
   if (value && typeof value === 'object') {
-    const nestedValues = [
-      value.signature,
-      value.signedData,
-      value.data,
-      value.result,
-    ];
+    const nestedValues = [value.signature, value.signedData, value.data, value.result];
 
     for (const nestedValue of nestedValues) {
       if (nestedValue == null) {
@@ -184,6 +150,107 @@ function toUint8Array(value) {
   }
 
   throw new Error('Unable to read signed payload from Pera Wallet.');
+}
+
+function promoteDesktopQrFlow() {
+  if (typeof document === 'undefined' || isMobilePeraFlow()) {
+    return () => {};
+  }
+
+  const applyQrOnlyMode = () => {
+    const modalWrapper = document.getElementById(PERA_MODAL_WRAPPER_ID);
+    const modal = modalWrapper?.querySelector('pera-wallet-connect-modal');
+    const desktopMode = modal?.shadowRoot?.querySelector('pera-wallet-modal-desktop-mode');
+    const desktopRoot = desktopMode?.shadowRoot;
+
+    if (!desktopRoot) {
+      return false;
+    }
+
+    const webWalletOption = desktopRoot.getElementById(WEB_WALLET_OPTION_ID);
+    const mobileWalletOption = desktopRoot.getElementById(MOBILE_WALLET_OPTION_ID);
+
+    webWalletOption?.remove();
+    mobileWalletOption?.classList.add('pera-wallet-accordion-item--active');
+    desktopRoot.querySelectorAll('.pera-wallet-accordion-item').forEach((item) => {
+      if (item.id !== MOBILE_WALLET_OPTION_ID) {
+        item.classList.remove('pera-wallet-accordion-item--active');
+      }
+    });
+
+    const downloadDescription = desktopRoot.querySelector(
+      '.pera-wallet-connect-modal-desktop-mode__download-pera-description',
+    );
+
+    if (downloadDescription) {
+      downloadDescription.textContent = 'Scan this QR code with Pera Wallet on your phone.';
+    }
+
+    return true;
+  };
+
+  if (applyQrOnlyMode()) {
+    return () => {};
+  }
+
+  const observer = new MutationObserver(() => {
+    if (applyQrOnlyMode()) {
+      observer.disconnect();
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  const timeoutId = window.setTimeout(() => {
+    observer.disconnect();
+  }, 10000);
+
+  return () => {
+    window.clearTimeout(timeoutId);
+    observer.disconnect();
+  };
+}
+
+async function resetUnsupportedDesktopSession(peraWallet, accounts) {
+  if (!accounts?.length || isMobilePeraFlow() || peraWallet.platform !== 'web') {
+    return accounts;
+  }
+
+  await peraWallet.disconnect();
+  return [];
+}
+
+export function isMobilePeraFlow() {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || navigator.vendor || '';
+  const isTouchMac = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
+
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(userAgent) ||
+    isTouchMac
+  );
+}
+
+export function looksLikeAlgorandAddress(address) {
+  return ALGO_ADDRESS_PATTERN.test((address || '').trim());
+}
+
+export function isLegacyEthereumAddress(address) {
+  return LEGACY_ETH_ADDRESS_PATTERN.test((address || '').trim());
+}
+
+export async function validateAlgorandAddress(address) {
+  const normalized = (address || '').trim().toUpperCase();
+  const algosdk = await getAlgosdk();
+
+  if (!normalized || !algosdk.isValidAddress(normalized)) {
+    throw new Error('Enter a valid Algorand wallet address.');
+  }
+
+  return normalized;
 }
 
 export function bytesToBase64(bytes) {
@@ -211,15 +278,6 @@ export function buildSignInMessage({ walletAddress, nonce, issuedAt, origin }) {
   );
 }
 
-async function resetUnsupportedDesktopSession(peraWallet, accounts) {
-  if (!accounts?.length || isMobilePeraFlow() || peraWallet.platform !== 'web') {
-    return accounts;
-  }
-
-  await peraWallet.disconnect();
-  return [];
-}
-
 export async function connectPeraWallet(expectedAddress) {
   const peraWallet = await getPeraWallet();
   let accounts = await getConnectedPeraAccounts(peraWallet);
@@ -241,7 +299,6 @@ export async function connectPeraWallet(expectedAddress) {
   }
 
   const matchingAccount = getMatchingAccount(accounts, expectedAddress);
-
   if (!matchingAccount) {
     throw new Error('Please connect the same Algorand account in Pera Wallet to continue.');
   }
@@ -254,9 +311,7 @@ export async function signMessageWithPera(message, signerAddress) {
   const connectedAccounts = await getConnectedPeraAccounts(peraWallet);
   const activeAddress =
     getMatchingAccount(connectedAccounts, signerAddress) ||
-    (connectedAccounts?.length
-      ? null
-      : await connectPeraWallet(signerAddress));
+    (connectedAccounts?.length ? null : await connectPeraWallet(signerAddress));
 
   if (!activeAddress) {
     throw new Error('Please connect the same Algorand account in Pera Wallet to continue.');
@@ -275,6 +330,59 @@ export async function signMessageWithPera(message, signerAddress) {
 
   const signatureBytes = toUint8Array(Array.isArray(signedPayload) ? signedPayload[0] : signedPayload);
   return bytesToBase64(signatureBytes);
+}
+
+export async function submitAlgoTransfer({
+  senderAddress,
+  recipientAddress,
+  amount,
+  note = 'SentinelX TrustChat payment',
+}) {
+  const sender = await connectPeraWallet(senderAddress);
+  const receiver = await validateAlgorandAddress(recipientAddress);
+  const { normalized, microalgos } = parseAlgoAmount(amount);
+  const peraWallet = await getPeraWallet();
+  const algosdk = await getAlgosdk();
+  const algodClient = await getAlgodClient();
+  const suggestedParams = await algodClient.getTransactionParams().do();
+
+  const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender,
+    receiver,
+    amount: microalgos,
+    suggestedParams,
+    note: new TextEncoder().encode(note),
+  });
+
+  const signedTransactions = await peraWallet.signTransaction(
+    [
+      [
+        {
+          txn,
+          signers: [sender],
+          message: `Approve ${normalized} ALGO transfer in Pera Wallet`,
+        },
+      ],
+    ],
+    sender,
+  );
+
+  if (!signedTransactions?.length) {
+    throw new Error('Pera Wallet did not return a signed transaction.');
+  }
+
+  const submission = await algodClient.sendRawTransaction(
+    signedTransactions.length === 1 ? signedTransactions[0] : signedTransactions,
+  ).do();
+  const txId = submission?.txid || txn.txID();
+  const confirmation = await algosdk.waitForConfirmation(algodClient, txId, 4);
+
+  return {
+    txId,
+    normalizedAmount: normalized,
+    confirmedRound: Number(confirmation?.['confirmed-round'] || 0),
+    explorerUrl: getAlgorandExplorerUrl(txId),
+  };
 }
 
 export function getAlgorandExplorerUrl(txHash) {

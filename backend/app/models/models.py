@@ -463,7 +463,8 @@ class TransactionEvent(Base):
     # Status
     status = Column(String, default="pending")  # pending, approved, blocked, completed, cooldown
     tx_hash = Column(String, nullable=True)  # On-chain hash if completed
-    
+    network = Column(String, nullable=True, index=True)
+
     # Step-up verification
     step_up_required = Column(Boolean, default=False)
     step_up_completed = Column(Boolean, default=False)

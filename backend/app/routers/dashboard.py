@@ -55,6 +55,7 @@ from app.database import get_db
 from app.models.models import LoginEvent, GuardEvent, TransactionEvent
 from app.services.merkle import MerkleBatcher
 from app.services.enforcement import SecurityEnforcement
+from app.services.blockchain import get_transaction_network
 from app.config import settings
 
 
@@ -110,7 +111,13 @@ async def get_overview(
     guard_events = guard_result.scalars().all()
 
     # ─── FETCH TRANSACTION EVENTS ───────────────────────────────────────
-    tx_query = select(TransactionEvent).order_by(desc(TransactionEvent.created_at)).limit(100)
+    active_transaction_network = get_transaction_network()
+    tx_query = (
+        select(TransactionEvent)
+        .where(TransactionEvent.network == active_transaction_network)
+        .order_by(desc(TransactionEvent.created_at))
+        .limit(100)
+    )
     if wallet_address:
         w = wallet_address.lower()
         tx_query = tx_query.where(
@@ -130,6 +137,21 @@ async def get_overview(
         count_query = count_query.where(LoginEvent.wallet_address == wallet_address.lower())
     count_result = await db.execute(count_query)
     total_logins = count_result.scalar() or 0
+
+    tx_stats_query = select(
+        func.count(),
+        func.count().filter(TransactionEvent.status == "blocked"),
+        func.coalesce(func.sum(TransactionEvent.amount_eth).filter(TransactionEvent.status == "completed"), 0),
+    ).where(TransactionEvent.network == active_transaction_network)
+    if wallet_address:
+        tx_stats_query = tx_stats_query.where(
+            (TransactionEvent.sender_wallet == wallet_address.lower()) |
+            (TransactionEvent.recipient_wallet == wallet_address.lower())
+        )
+    tx_stats_row = (await db.execute(tx_stats_query)).one()
+    total_transactions = tx_stats_row[0] or 0
+    blocked_transactions = tx_stats_row[1] or 0
+    total_transferred = round(float(tx_stats_row[2] or 0), 6)
     
     risk_scores = [e.risk_score for e in login_events]
     avg_risk = round(sum(risk_scores) / len(risk_scores), 4) if risk_scores else 0
@@ -169,9 +191,9 @@ async def get_overview(
             "events_on_chain": merkle_stats["total_events_batched"],
             "pending_events": merkle_stats["pending_events"],
             # Transaction statistics
-            "total_transactions": len(tx_events),
-            "blocked_transactions": sum(1 for e in tx_events if e.status == "blocked"),
-            "total_eth_transferred": round(sum(e.amount_eth for e in tx_events if e.status == "completed"), 6),
+            "total_transactions": total_transactions,
+            "blocked_transactions": blocked_transactions,
+            "total_eth_transferred": total_transferred,
         },
         "trust_score": trust_score,
         "enforcement": enforcement,

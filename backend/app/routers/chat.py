@@ -67,6 +67,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, AsyncSessionLocal
 from app.models.models import Conversation, ConversationParticipant, Message
+from app.services.blockchain import normalize_algorand_address
 from app.services.guard_layer import GuardLayer
 from app.services.merkle import MerkleBatcher
 from app.services.jwt_utils import verify_token
@@ -232,9 +233,14 @@ async def handle_create_conversation(ws: WebSocket, wallet: str, data: dict):
     ║ 4. Notify peer if they're online                                          ║
     ╚═══════════════════════════════════════════════════════════════════════════╝
     """
-    peer_wallet = data.get("peer_wallet", "").strip().lower()
-    if not peer_wallet:
+    peer_input = data.get("peer_wallet", "").strip()
+    if not peer_input:
         await ws.send_json({"type": "error", "message": "peer_wallet required"})
+        return
+    try:
+        peer_wallet = normalize_algorand_address(peer_input).lower()
+    except ValueError:
+        await ws.send_json({"type": "error", "message": "peer_wallet must be a valid Algorand address"})
         return
 
     async with AsyncSessionLocal() as db:
